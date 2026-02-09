@@ -818,6 +818,12 @@ func printBurstBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) error {
 			if err := printUnblockerBreakdown(db, w, runnableStartNs); err != nil {
 				return err
 			}
+			if err := printUnblockedGoroutineStacks(db, w, runnableStartNs); err != nil {
+				return err
+			}
+			if err := printHeavyUnblockers(db, w, runnableStartNs); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -911,6 +917,123 @@ func printUnblockerBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) err
 			fmt.Fprintf(w, "     Unblocked by (%d): %s\n", cnt, fn)
 		} else {
 			fmt.Fprintf(w, "     Unblocked by (%d): (unknown)\n", cnt)
+		}
+	}
+	return rows.Err()
+}
+
+// printUnblockedGoroutineStacks shows what the unblocked goroutines were doing
+// when they blocked, grouped by their blocking call stack. This identifies
+// "worker pool" patterns where many goroutines of the same kind are all waiting
+// on the same thing (e.g., 173 raftScheduler workers all blocked on Cond.Wait).
+func printUnblockedGoroutineStacks(db *sql.DB, w io.Writer, runnableStartNs int64) error {
+	// The stack_id on waiting→runnable transitions is not populated in the Go
+	// trace, so we look at each goroutine's most recent running→* transition
+	// to find what it was doing when it blocked.
+	rows, err := db.Query(`
+		WITH burst_gs AS (
+			SELECT DISTINCT g, end_time_ns as unblock_time
+			FROM g_transitions
+			WHERE to_state = 'runnable'
+			  AND from_state = 'waiting'
+			  AND end_time_ns - duration_ns BETWEEN $1 - 1000000 AND $1 + 1000000
+		),
+		g_wait_stack_ids AS (
+			SELECT bg.g,
+				(SELECT gt2.stack_id FROM g_transitions gt2
+				 WHERE gt2.g = bg.g
+				   AND gt2.from_state = 'running'
+				   AND gt2.stack_id IS NOT NULL
+				   AND gt2.end_time_ns <= bg.unblock_time
+				 ORDER BY gt2.end_time_ns DESC
+				 LIMIT 1) as wait_stack_id
+			FROM burst_gs bg
+		)
+		SELECT
+			s.funcs::VARCHAR as stack_funcs,
+			COUNT(*) as cnt
+		FROM g_wait_stack_ids gwsi
+		JOIN stacks s ON gwsi.wait_stack_id = s.stack_id
+		WHERE gwsi.wait_stack_id IS NOT NULL
+		GROUP BY 1
+		ORDER BY cnt DESC, 1
+		LIMIT $2
+	`, runnableStartNs, 3)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var stackStr string
+		var cnt int
+		if err := rows.Scan(&stackStr, &cnt); err != nil {
+			return err
+		}
+		stack := parseStackArray(stackStr)
+		formatted := formatStack(stack, 80)
+		// If the leaf frame is a runtime/sync function that formatStack filters
+		// out, show it in brackets so that entries differing only in their
+		// blocking primitive (e.g. Cond.Wait vs Mutex.Lock) remain distinct.
+		if len(stack) > 0 && !isInterestingFrame(stack[0]) {
+			leaf := shortenFuncName(stack[0])
+			fmt.Fprintf(w, "     Blocked at (%d): %s [%s]\n", cnt, formatted, leaf)
+		} else {
+			fmt.Fprintf(w, "     Blocked at (%d): %s\n", cnt, formatted)
+		}
+	}
+	return rows.Err()
+}
+
+// printHeavyUnblockers shows individual goroutines that unblocked the most
+// other goroutines in the burst window. This pinpoints the root-cause goroutine
+// driving the burst (e.g., the raftTickLoop goroutine that wakes hundreds of
+// raft scheduler workers via Cond.Broadcast).
+func printHeavyUnblockers(db *sql.DB, w io.Writer, runnableStartNs int64) error {
+	rows, err := db.Query(`
+		WITH burst_unblocks AS (
+			SELECT src_g, src_stack_id
+			FROM g_transitions
+			WHERE to_state = 'runnable'
+			  AND from_state = 'waiting'
+			  AND end_time_ns - duration_ns BETWEEN $1 - 1000000 AND $1 + 1000000
+			  AND src_g IS NOT NULL
+		),
+		by_unblocker AS (
+			SELECT
+				src_g,
+				mode(src_stack_id) as common_stack_id,
+				COUNT(*) as cnt
+			FROM burst_unblocks
+			GROUP BY src_g
+			ORDER BY cnt DESC
+			LIMIT $2
+		)
+		SELECT
+			bu.src_g,
+			s.funcs::VARCHAR as unblocker_funcs,
+			bu.cnt
+		FROM by_unblocker bu
+		LEFT JOIN stacks s ON bu.common_stack_id = s.stack_id
+		ORDER BY bu.cnt DESC, bu.src_g
+	`, runnableStartNs, 3)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var srcG int64
+		var stackStr sql.NullString
+		var cnt int
+		if err := rows.Scan(&srcG, &stackStr, &cnt); err != nil {
+			return err
+		}
+		if stackStr.Valid {
+			stack := parseStackArray(stackStr.String)
+			fmt.Fprintf(w, "     Heavy unblocker G%d (%d): %s\n", srcG, cnt, formatStack(stack, 100))
+		} else {
+			fmt.Fprintf(w, "     Heavy unblocker G%d (%d): (unknown stack)\n", srcG, cnt)
 		}
 	}
 	return rows.Err()
