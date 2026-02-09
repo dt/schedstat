@@ -1,0 +1,82 @@
+schedstat: microspikes_ticks_heartbeats.bin
+============================================================
+
+Trace duration: 3000.7ms
+
+--- Scheduling Latency (runnable → running) ---
+Events: 163815
+  min: 1ns         p50: 6.1µs       p90: 85.4µs    
+  avg: 37.1µs      p99: 443.5µs     max: 2.43ms    
+
+--- Anomalies (p99 > 1ms per 100ms) ---
+6 window(s) with elevated latency
+
+  t=2200  ms  p99=1.83ms      max=2.41ms      5962 events, 485 goroutines
+  t=1200  ms  p99=1.76ms      max=2.43ms      5075 events, 458 goroutines
+  t=1700  ms  p99=1.74ms      max=2.23ms      4183 events, 464 goroutines
+  t=700   ms  p99=1.63ms      max=2.30ms      5519 events, 500 goroutines
+  t=2700  ms  p99=1.14ms      max=1.77ms      5562 events, 515 goroutines
+
+--- Why Did the 5 Worst Delays Happen? ---
+
+1. G2074 waited 2.43ms on P15
+   → Burst: 176 goroutines became runnable within ±1ms
+     Breakdown: 329 unblocked, 13 preempted, 4 new
+     Unblocked by (173): (*Cond).Broadcast
+     Unblocked by (61): (*Mutex).Unlock
+     Unblocked by (37): (*Cond).Signal
+     Created by (3): (*http2Server).operateHeaders → (*Server).serveStreams.func1
+     Created by (1): (*txnCommitter).makeTxnCommitExplicitAsync → (*Stopper).RunAsyncTaskEx
+   → Longest run during wait: G1936 ran 620.1µs
+     (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker
+   → Queue activity: 9 goroutines ran 10 times during the wait
+
+2. G2067 waited 2.41ms on P10
+   → Burst: 176 goroutines became runnable within ±1ms
+     Breakdown: 329 unblocked, 13 preempted, 4 new
+     Unblocked by (173): (*Cond).Broadcast
+     Unblocked by (61): (*Mutex).Unlock
+     Unblocked by (37): (*Cond).Signal
+     Created by (3): (*http2Server).operateHeaders → (*Server).serveStreams.func1
+     Created by (1): (*txnCommitter).makeTxnCommitExplicitAsync → (*Stopper).RunAsyncTaskEx
+   → Longest run during wait: G2150 ran 1.04ms
+     (*Store).processReady → (*Replica).maybeCoalesceHeartbeat
+   → Queue activity: 19 goroutines ran 20 times during the wait
+
+3. G1934 waited 2.41ms on P10
+   → Burst: 176 goroutines became runnable within ±1ms
+     Breakdown: 329 unblocked, 13 preempted, 4 new
+     Unblocked by (173): (*Cond).Broadcast
+     Unblocked by (61): (*Mutex).Unlock
+     Unblocked by (37): (*Cond).Signal
+     Created by (3): (*http2Server).operateHeaders → (*Server).serveStreams.func1
+     Created by (1): (*txnCommitter).makeTxnCommitExplicitAsync → (*Stopper).RunAsyncTaskEx
+   → Longest run during wait: G2150 ran 1.04ms
+     (*Store).processReady → (*Replica).maybeCoalesceHeartbeat
+   → Queue activity: 18 goroutines ran 19 times during the wait
+
+4. G1927 waited 2.41ms on P9
+   → Burst: 93 goroutines became runnable within ±1ms
+     Breakdown: 125 unblocked, 14 preempted, 3 new
+     Unblocked by (45): selectnbsend
+     Unblocked by (33): (*Mutex).Unlock
+     Unblocked by (11): (*Cond).Broadcast
+     Created by (1): (*DistSender).sendPartialBatchAsync → (*Stopper).RunAsyncTaskEx
+     Created by (1): (*pendingLeaseRequest).requestLeaseAsync → (*Stopper).RunAsyncTaskEx
+     Created by (1): (*DistSender).divideAndSendParallelCommit → (*Stopper).RunAsyncTaskEx
+   → Longest run during wait: G2041 ran 646.3µs
+     (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker
+   → Queue activity: 21 goroutines ran 27 times during the wait
+
+5. G1930 waited 2.41ms on P9
+   → Burst: 93 goroutines became runnable within ±1ms
+     Breakdown: 125 unblocked, 14 preempted, 3 new
+     Unblocked by (45): selectnbsend
+     Unblocked by (33): (*Mutex).Unlock
+     Unblocked by (11): (*Cond).Broadcast
+     Created by (1): (*DistSender).sendPartialBatchAsync → (*Stopper).RunAsyncTaskEx
+     Created by (1): (*pendingLeaseRequest).requestLeaseAsync → (*Stopper).RunAsyncTaskEx
+     Created by (1): (*DistSender).divideAndSendParallelCommit → (*Stopper).RunAsyncTaskEx
+   → Longest run during wait: G2041 ran 646.3µs
+     (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker
+   → Queue activity: 20 goroutines ran 26 times during the wait
