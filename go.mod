@@ -1,4 +1,4 @@
-module github.com/cockroachdb/schedstat
+module github.com/dt/schedstat
 
 go 1.25.1
 

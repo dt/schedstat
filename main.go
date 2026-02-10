@@ -13,7 +13,7 @@ import (
 
 	"io"
 
-	"github.com/cockroachdb/schedstat/internal/tracedb"
+	"github.com/dt/schedstat/internal/tracedb"
 	_ "github.com/marcboeker/go-duckdb"
 	"github.com/spf13/cobra"
 )
