@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"io"
+
 	"github.com/cockroachdb/schedstat/internal/tracedb"
 	_ "github.com/marcboeker/go-duckdb"
 	"github.com/spf13/cobra"
@@ -110,7 +112,7 @@ func run(traceFile string) error {
 
 	database := db.DB
 
-	if err := analyze(database, traceFile); err != nil {
+	if err := analyze(database, traceFile, os.Stdout); err != nil {
 		database.Close()
 		return err
 	}
@@ -133,9 +135,32 @@ func run(traceFile string) error {
 	return nil
 }
 
-func analyze(db *sql.DB, traceFile string) error {
-	fmt.Printf("schedstat: %s\n", filepath.Base(traceFile))
-	fmt.Println(strings.Repeat("=", 60))
+// runAnalysis is the internal entry point for running schedstat on a trace file,
+// writing output to w. Tests use this to capture output without compiling and
+// executing the binary.
+func runAnalysis(traceFile string, w io.Writer) error {
+	dbFile := traceFile + ".duckdb"
+	defer os.Remove(dbFile)
+	_ = os.Remove(dbFile)
+
+	traceData, err := os.Open(traceFile)
+	if err != nil {
+		return fmt.Errorf("opening trace file: %w", err)
+	}
+
+	db, err := tracedb.Create(dbFile, traceData)
+	traceData.Close()
+	if err != nil {
+		return fmt.Errorf("loading trace: %w", err)
+	}
+	defer db.DB.Close()
+
+	return analyze(db.DB, traceFile, w)
+}
+
+func analyze(db *sql.DB, traceFile string, w io.Writer) error {
+	fmt.Fprintf(w, "schedstat: %s\n", filepath.Base(traceFile))
+	fmt.Fprintln(w, strings.Repeat("=", 60))
 
 	// Get time bounds
 	var minTime, maxTime int64
@@ -148,63 +173,63 @@ func analyze(db *sql.DB, traceFile string) error {
 		return fmt.Errorf("getting time bounds: %w", err)
 	}
 	durationMs := float64(maxTime-minTime) / 1e6
-	fmt.Printf("\nTrace duration: %.1fms\n", durationMs)
+	fmt.Fprintf(w, "\nTrace duration: %.1fms\n", durationMs)
 
 	// Always show overall stats
-	if err := printOverallStats(db); err != nil {
+	if err := printOverallStats(db, w); err != nil {
 		return err
 	}
 
 	// Time series if requested
 	if opts.timeseries {
-		if err := printTimeseries(db, minTime, opts.window); err != nil {
+		if err := printTimeseries(db, w, minTime, opts.window); err != nil {
 			return err
 		}
 	}
 
 	// Anomaly detection (always)
-	if err := printAnomalies(db, minTime, opts.window, opts.spikeThreshold); err != nil {
+	if err := printAnomalies(db, w, minTime, opts.window, opts.spikeThreshold); err != nil {
 		return err
 	}
 
 	// By-creator analysis
 	if opts.byCreator {
-		if err := printByCreator(db); err != nil {
+		if err := printByCreator(db, w); err != nil {
 			return err
 		}
 	}
 
 	// GC analysis
 	if opts.gc {
-		if err := printGCAnalysis(db); err != nil {
+		if err := printGCAnalysis(db, w); err != nil {
 			return err
 		}
 	}
 
 	// Burst analysis
 	if opts.bursts {
-		if err := printBurstAnalysis(db, opts.window); err != nil {
+		if err := printBurstAnalysis(db, w, opts.window); err != nil {
 			return err
 		}
 	}
 
 	// Worst delays
 	if opts.worst > 0 {
-		if err := printWorstDelays(db, opts.worst); err != nil {
+		if err := printWorstDelays(db, w, opts.worst); err != nil {
 			return err
 		}
 	}
 
 	// Root cause analysis
 	if opts.why > 0 {
-		if err := printWhyDelays(db, opts.why); err != nil {
+		if err := printWhyDelays(db, w, opts.why); err != nil {
 			return err
 		}
 	}
 
 	// Top goroutines by wait time (optional, can be slow)
 	if opts.topWaiters {
-		if err := printTopGoroutines(db); err != nil {
+		if err := printTopGoroutines(db, w); err != nil {
 			return err
 		}
 	}
@@ -212,7 +237,7 @@ func analyze(db *sql.DB, traceFile string) error {
 	return nil
 }
 
-func printOverallStats(db *sql.DB) error {
+func printOverallStats(db *sql.DB, w io.Writer) error {
 	var count int
 	var minNs, avgNs, p50Ns, p90Ns, p99Ns, maxNs sql.NullFloat64
 
@@ -232,18 +257,18 @@ func printOverallStats(db *sql.DB) error {
 		return fmt.Errorf("getting overall stats: %w", err)
 	}
 
-	fmt.Println("\n--- Scheduling Latency (runnable → running) ---")
-	fmt.Printf("Events: %d\n", count)
+	fmt.Fprintln(w, "\n--- Scheduling Latency (runnable → running) ---")
+	fmt.Fprintf(w, "Events: %d\n", count)
 	if count > 0 {
-		fmt.Printf("  min: %-10s  p50: %-10s  p90: %-10s\n",
+		fmt.Fprintf(w, "  min: %-10s  p50: %-10s  p90: %-10s\n",
 			fmtNullDuration(minNs), fmtNullDuration(p50Ns), fmtNullDuration(p90Ns))
-		fmt.Printf("  avg: %-10s  p99: %-10s  max: %-10s\n",
+		fmt.Fprintf(w, "  avg: %-10s  p99: %-10s  max: %-10s\n",
 			fmtNullDuration(avgNs), fmtNullDuration(p99Ns), fmtNullDuration(maxNs))
 	}
 	return nil
 }
 
-func printTimeseries(db *sql.DB, minTime int64, window time.Duration) error {
+func printTimeseries(db *sql.DB, w io.Writer, minTime int64, window time.Duration) error {
 	windowNs := window.Nanoseconds()
 
 	rows, err := db.Query(`
@@ -263,9 +288,9 @@ func printTimeseries(db *sql.DB, minTime int64, window time.Duration) error {
 	}
 	defer rows.Close()
 
-	fmt.Printf("\n--- Latency by %s Window ---\n", window)
-	fmt.Printf("%-8s %-10s %-10s %-8s %-12s\n", "Window", "Start(ms)", "End(ms)", "Events", "p99")
-	fmt.Printf("%-8s %-10s %-10s %-8s %-12s\n", "------", "---------", "-------", "------", "---")
+	fmt.Fprintf(w, "\n--- Latency by %s Window ---\n", window)
+	fmt.Fprintf(w, "%-8s %-10s %-10s %-8s %-12s\n", "Window", "Start(ms)", "End(ms)", "Events", "p99")
+	fmt.Fprintf(w, "%-8s %-10s %-10s %-8s %-12s\n", "------", "---------", "-------", "------", "---")
 
 	for rows.Next() {
 		var windowNum int
@@ -279,13 +304,13 @@ func printTimeseries(db *sql.DB, minTime int64, window time.Duration) error {
 		if p99 > float64((opts.spikeThreshold).Nanoseconds()) {
 			marker = " ←"
 		}
-		fmt.Printf("%-8d %-10.0f %-10.0f %-8d %-12s%s\n",
+		fmt.Fprintf(w, "%-8d %-10.0f %-10.0f %-8d %-12s%s\n",
 			windowNum, startMs, endMs, cnt, fmtDuration(p99), marker)
 	}
 	return rows.Err()
 }
 
-func printAnomalies(db *sql.DB, minTime int64, window, threshold time.Duration) error {
+func printAnomalies(db *sql.DB, w io.Writer, minTime int64, window, threshold time.Duration) error {
 	windowNs := window.Nanoseconds()
 	thresholdNs := float64(threshold.Nanoseconds())
 
@@ -304,14 +329,14 @@ func printAnomalies(db *sql.DB, minTime int64, window, threshold time.Duration) 
 		return fmt.Errorf("counting spikes: %w", err)
 	}
 
-	fmt.Printf("\n--- Anomalies (p99 > %s per %s) ---\n", threshold, window)
+	fmt.Fprintf(w, "\n--- Anomalies (p99 > %s per %s) ---\n", threshold, window)
 
 	if spikeCount == 0 {
-		fmt.Println("No anomalies detected.")
+		fmt.Fprintln(w, "No anomalies detected.")
 		return nil
 	}
 
-	fmt.Printf("%d window(s) with elevated latency\n\n", spikeCount)
+	fmt.Fprintf(w, "%d window(s) with elevated latency\n\n", spikeCount)
 
 	rows, err := db.Query(`
 		WITH windowed AS (
@@ -352,15 +377,15 @@ func printAnomalies(db *sql.DB, minTime int64, window, threshold time.Duration) 
 		if err := rows.Scan(&windowNum, &startMs, &eventCount, &goroutineCount, &p99, &maxLatency); err != nil {
 			return err
 		}
-		fmt.Printf("  t=%-6.0fms  p99=%-10s  max=%-10s  %d events, %d goroutines\n",
+		fmt.Fprintf(w, "  t=%-6.0fms  p99=%-10s  max=%-10s  %d events, %d goroutines\n",
 			startMs, fmtDuration(p99), fmtDuration(maxLatency), eventCount, goroutineCount)
 	}
 
 	return rows.Err()
 }
 
-func printByCreator(db *sql.DB) error {
-	fmt.Println("\n--- Delays by Goroutine Creator ---")
+func printByCreator(db *sql.DB, w io.Writer) error {
+	fmt.Fprintln(w, "\n--- Delays by Goroutine Creator ---")
 
 	rows, err := db.Query(`
 		SELECT
@@ -390,15 +415,15 @@ func printByCreator(db *sql.DB) error {
 		if err := rows.Scan(&creator, &cnt, &totalWait, &maxWait, &p99); err != nil {
 			return err
 		}
-		fmt.Printf("  %s\n", shortenFunc(creator))
-		fmt.Printf("    %d events, total: %s, max: %s, p99: %s\n",
+		fmt.Fprintf(w, "  %s\n", shortenFunc(creator))
+		fmt.Fprintf(w, "    %d events, total: %s, max: %s, p99: %s\n",
 			cnt, fmtDuration(totalWait), fmtDuration(maxWait), fmtDuration(p99))
 	}
 	return rows.Err()
 }
 
-func printGCAnalysis(db *sql.DB) error {
-	fmt.Println("\n--- GC-Related Activity ---")
+func printGCAnalysis(db *sql.DB, w io.Writer) error {
+	fmt.Fprintln(w, "\n--- GC-Related Activity ---")
 
 	rows, err := db.Query(`
 		SELECT
@@ -431,22 +456,22 @@ func printGCAnalysis(db *sql.DB) error {
 		if err := rows.Scan(&fromState, &toState, &reason, &transitions, &totalNs, &maxNs); err != nil {
 			return err
 		}
-		fmt.Printf("  %s → %s (%s)\n", fromState, toState, reason)
-		fmt.Printf("    %d transitions, total: %s, max: %s\n",
+		fmt.Fprintf(w, "  %s → %s (%s)\n", fromState, toState, reason)
+		fmt.Fprintf(w, "    %d transitions, total: %s, max: %s\n",
 			transitions, fmtDuration(totalNs), fmtDuration(maxNs))
 	}
 	if !hasRows {
-		fmt.Println("  No GC-related transitions found.")
+		fmt.Fprintln(w, "  No GC-related transitions found.")
 	}
 	return rows.Err()
 }
 
-func printBurstAnalysis(db *sql.DB, window time.Duration) error {
+func printBurstAnalysis(db *sql.DB, w io.Writer, window time.Duration) error {
 	// Use 1ms micro-windows to detect bursts
 	microWindowNs := int64(1e6) // 1ms
 	_ = window                  // reserved for future use
 
-	fmt.Printf("\n--- Goroutine Bursts (>10 becoming runnable in 1ms) ---\n")
+	fmt.Fprintf(w, "\n--- Goroutine Bursts (>10 becoming runnable in 1ms) ---\n")
 
 	rows, err := db.Query(`
 		WITH min_time AS (
@@ -486,16 +511,16 @@ func printBurstAnalysis(db *sql.DB, window time.Duration) error {
 		if err := rows.Scan(&windowMs, &spawned, &distinctCreators); err != nil {
 			return err
 		}
-		fmt.Printf("  t=%-8.1fms: %d goroutines became runnable (%d distinct creators)\n",
+		fmt.Fprintf(w, "  t=%-8.1fms: %d goroutines became runnable (%d distinct creators)\n",
 			windowMs, spawned, distinctCreators)
 	}
 	if !hasRows {
-		fmt.Println("  No significant bursts detected.")
+		fmt.Fprintln(w, "  No significant bursts detected.")
 	}
 
 	// Show the top creators of goroutines that experienced delays
 	// Look at the creation event (from_state='notexist') to find who created them
-	fmt.Printf("\n--- Who Launched Delayed Goroutines? ---\n")
+	fmt.Fprintf(w, "\n--- Who Launched Delayed Goroutines? ---\n")
 
 	creatorRows, err := db.Query(`
 		WITH delayed AS (
@@ -540,19 +565,19 @@ func printBurstAnalysis(db *sql.DB, window time.Duration) error {
 			return err
 		}
 		stack := parseStackArray(stackStr)
-		fmt.Printf("  %s\n", formatStack(stack, 80))
-		fmt.Printf("    launched %d delayed goroutines, total delay: %s, max: %s\n",
+		fmt.Fprintf(w, "  %s\n", formatStack(stack, 80))
+		fmt.Fprintf(w, "    launched %d delayed goroutines, total delay: %s, max: %s\n",
 			count, fmtDuration(totalNs), fmtDuration(maxNs))
 	}
 	if !hasCreators {
-		fmt.Println("  (no creator info available)")
+		fmt.Fprintln(w, "  (no creator info available)")
 	}
 
 	return creatorRows.Err()
 }
 
-func printWorstDelays(db *sql.DB, n int) error {
-	fmt.Printf("\n--- %d Worst Individual Delays ---\n", n)
+func printWorstDelays(db *sql.DB, w io.Writer, n int) error {
+	fmt.Fprintf(w, "\n--- %d Worst Individual Delays ---\n", n)
 
 	// Stack info is on running→* transitions, not runnable→running.
 	// Get full stack array for proper formatting.
@@ -588,15 +613,15 @@ func printWorstDelays(db *sql.DB, n int) error {
 			return err
 		}
 		stack := parseStackArray(stackStr)
-		fmt.Printf("\n%d. G%d waited %s\n", rank, g, fmtDuration(durationNs))
-		fmt.Printf("   %s\n", formatStack(stack, 100))
+		fmt.Fprintf(w, "\n%d. G%d waited %s\n", rank, g, fmtDuration(durationNs))
+		fmt.Fprintf(w, "   %s\n", formatStack(stack, 100))
 		rank++
 	}
 	return rows.Err()
 }
 
-func printWhyDelays(db *sql.DB, n int) error {
-	fmt.Printf("\n--- Why Did the %d Worst Delays Happen? ---\n", n)
+func printWhyDelays(db *sql.DB, w io.Writer, n int) error {
+	fmt.Fprintf(w, "\n--- Why Did the %d Worst Delays Happen? ---\n", n)
 
 	// Get worst delays with their P and time window
 	rows, err := db.Query(`
@@ -633,11 +658,11 @@ func printWhyDelays(db *sql.DB, n int) error {
 
 	// For each delay, analyze WHY this goroutine had to wait
 	for i, d := range delays {
-		fmt.Printf("\n%d. G%d waited %s", i+1, d.g, fmtDuration(d.durationNs))
+		fmt.Fprintf(w, "\n%d. G%d waited %s", i+1, d.g, fmtDuration(d.durationNs))
 		if d.srcP.Valid {
-			fmt.Printf(" on P%d", d.srcP.Int64)
+			fmt.Fprintf(w, " on P%d", d.srcP.Int64)
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 
 		// Question 1: Was there a burst of goroutines becoming runnable?
 		// Count how many goroutines became runnable within 1ms of when this G became runnable
@@ -691,33 +716,33 @@ func printWhyDelays(db *sql.DB, n int) error {
 
 		// Report findings
 		if burstCount > 10 {
-			fmt.Printf("   → Burst: %d goroutines became runnable within ±1ms\n", burstCount)
+			fmt.Fprintf(w, "   → Burst: %d goroutines became runnable within ±1ms\n", burstCount)
 			// Show detailed burst breakdown
-			if err := printBurstBreakdown(db, d.waitStart); err != nil {
+			if err := printBurstBreakdown(db, w, d.waitStart); err != nil {
 				// Non-fatal: just skip the breakdown on error
 				if opts.verbose {
-					fmt.Printf("     (burst breakdown unavailable: %v)\n", err)
+					fmt.Fprintf(w, "     (burst breakdown unavailable: %v)\n", err)
 				}
 			}
 		}
 
 		if longestRunNs.Valid && longestRunNs.Float64 > 500000 { // > 500µs
 			stack := parseStackArray(longestRunStack.String)
-			fmt.Printf("   → Longest run during wait: G%d ran %s\n",
+			fmt.Fprintf(w, "   → Longest run during wait: G%d ran %s\n",
 				longestRunG.Int64, fmtDuration(longestRunNs.Float64))
 			if len(stack) > 0 {
-				fmt.Printf("     %s\n", formatStack(stack, 80))
+				fmt.Fprintf(w, "     %s\n", formatStack(stack, 80))
 			}
 		}
 
 		if runnersCount > 0 {
-			fmt.Printf("   → Queue activity: %d goroutines ran %d times during the wait\n",
+			fmt.Fprintf(w, "   → Queue activity: %d goroutines ran %d times during the wait\n",
 				runnersCount, totalRuns)
 		}
 
 		// If nothing notable, say so
 		if burstCount <= 10 && (!longestRunNs.Valid || longestRunNs.Float64 <= 500000) && runnersCount == 0 {
-			fmt.Println("   → No clear single cause identified")
+			fmt.Fprintln(w, "   → No clear single cause identified")
 		}
 	}
 
@@ -726,7 +751,7 @@ func printWhyDelays(db *sql.DB, n int) error {
 
 // printBurstBreakdown shows detailed analysis of goroutines that became runnable
 // in a burst around the given timestamp.
-func printBurstBreakdown(db *sql.DB, runnableStartNs int64) error {
+func printBurstBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) error {
 	// Get breakdown by category (created vs unblocked vs syscall-return etc)
 	// Focus on what's most actionable: new goroutines and unblocked goroutines
 	rows, err := db.Query(`
@@ -780,17 +805,23 @@ func printBurstBreakdown(db *sql.DB, runnableStartNs int64) error {
 	for _, c := range categories {
 		parts = append(parts, fmt.Sprintf("%d %s", c.count, c.name))
 	}
-	fmt.Printf("     Breakdown: %s\n", strings.Join(parts, ", "))
+	fmt.Fprintf(w, "     Breakdown: %s\n", strings.Join(parts, ", "))
 
 	// For created goroutines, show who created them
 	for _, c := range categories {
 		if c.name == "new" && c.count > 0 {
-			if err := printCreatorBreakdown(db, runnableStartNs); err != nil {
+			if err := printCreatorBreakdown(db, w, runnableStartNs); err != nil {
 				return err
 			}
 		}
 		if c.name == "unblocked" && c.count > 0 {
-			if err := printUnblockerBreakdown(db, runnableStartNs); err != nil {
+			if err := printUnblockerBreakdown(db, w, runnableStartNs); err != nil {
+				return err
+			}
+			if err := printUnblockedGoroutineStacks(db, w, runnableStartNs); err != nil {
+				return err
+			}
+			if err := printHeavyUnblockers(db, w, runnableStartNs); err != nil {
 				return err
 			}
 		}
@@ -800,7 +831,7 @@ func printBurstBreakdown(db *sql.DB, runnableStartNs int64) error {
 }
 
 // printCreatorBreakdown shows what code paths created the goroutines in a burst.
-func printCreatorBreakdown(db *sql.DB, runnableStartNs int64) error {
+func printCreatorBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) error {
 	rows, err := db.Query(`
 		WITH burst_creates AS (
 			SELECT g, src_stack_id
@@ -816,7 +847,7 @@ func printCreatorBreakdown(db *sql.DB, runnableStartNs int64) error {
 		FROM burst_creates bc
 		LEFT JOIN stacks s ON bc.src_stack_id = s.stack_id
 		GROUP BY bc.src_stack_id, creator_stack
-		ORDER BY cnt DESC
+		ORDER BY cnt DESC, creator_stack
 		LIMIT 3
 	`, runnableStartNs)
 	if err != nil {
@@ -839,19 +870,19 @@ func printCreatorBreakdown(db *sql.DB, runnableStartNs int64) error {
 			for i := range stack {
 				stack[i] = stripFileLocation(stack[i])
 			}
-			fmt.Printf("     Created by (%d): %s\n", cnt, formatStack(stack, 90))
+			fmt.Fprintf(w, "     Created by (%d): %s\n", cnt, formatStack(stack, 90))
 		} else {
-			fmt.Printf("     Created by (%d): (unknown creator)\n", cnt)
+			fmt.Fprintf(w, "     Created by (%d): (unknown creator)\n", cnt)
 		}
 	}
 	if !hasRows {
-		fmt.Println("     (no creator info available)")
+		fmt.Fprintln(w, "     (no creator info available)")
 	}
 	return rows.Err()
 }
 
 // printUnblockerBreakdown shows what code paths unblocked the waiting goroutines.
-func printUnblockerBreakdown(db *sql.DB, runnableStartNs int64) error {
+func printUnblockerBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) error {
 	rows, err := db.Query(`
 		WITH burst_unblocks AS (
 			SELECT g, src_stack_id
@@ -867,7 +898,7 @@ func printUnblockerBreakdown(db *sql.DB, runnableStartNs int64) error {
 		LEFT JOIN stacks s ON bu.src_stack_id = s.stack_id
 		WHERE bu.src_stack_id IS NOT NULL
 		GROUP BY unblocker_func
-		ORDER BY cnt DESC
+		ORDER BY cnt DESC, unblocker_func
 		LIMIT 3
 	`, runnableStartNs)
 	if err != nil {
@@ -883,9 +914,126 @@ func printUnblockerBreakdown(db *sql.DB, runnableStartNs int64) error {
 		}
 		if funcName.Valid {
 			fn := shortenFuncName(stripFileLocation(funcName.String))
-			fmt.Printf("     Unblocked by (%d): %s\n", cnt, fn)
+			fmt.Fprintf(w, "     Unblocked by (%d): %s\n", cnt, fn)
 		} else {
-			fmt.Printf("     Unblocked by (%d): (unknown)\n", cnt)
+			fmt.Fprintf(w, "     Unblocked by (%d): (unknown)\n", cnt)
+		}
+	}
+	return rows.Err()
+}
+
+// printUnblockedGoroutineStacks shows what the unblocked goroutines were doing
+// when they blocked, grouped by their blocking call stack. This identifies
+// "worker pool" patterns where many goroutines of the same kind are all waiting
+// on the same thing (e.g., 173 raftScheduler workers all blocked on Cond.Wait).
+func printUnblockedGoroutineStacks(db *sql.DB, w io.Writer, runnableStartNs int64) error {
+	// The stack_id on waiting→runnable transitions is not populated in the Go
+	// trace, so we look at each goroutine's most recent running→* transition
+	// to find what it was doing when it blocked.
+	rows, err := db.Query(`
+		WITH burst_gs AS (
+			SELECT DISTINCT g, end_time_ns as unblock_time
+			FROM g_transitions
+			WHERE to_state = 'runnable'
+			  AND from_state = 'waiting'
+			  AND end_time_ns - duration_ns BETWEEN $1 - 1000000 AND $1 + 1000000
+		),
+		g_wait_stack_ids AS (
+			SELECT bg.g,
+				(SELECT gt2.stack_id FROM g_transitions gt2
+				 WHERE gt2.g = bg.g
+				   AND gt2.from_state = 'running'
+				   AND gt2.stack_id IS NOT NULL
+				   AND gt2.end_time_ns <= bg.unblock_time
+				 ORDER BY gt2.end_time_ns DESC
+				 LIMIT 1) as wait_stack_id
+			FROM burst_gs bg
+		)
+		SELECT
+			s.funcs::VARCHAR as stack_funcs,
+			COUNT(*) as cnt
+		FROM g_wait_stack_ids gwsi
+		JOIN stacks s ON gwsi.wait_stack_id = s.stack_id
+		WHERE gwsi.wait_stack_id IS NOT NULL
+		GROUP BY 1
+		ORDER BY cnt DESC, 1
+		LIMIT $2
+	`, runnableStartNs, 3)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var stackStr string
+		var cnt int
+		if err := rows.Scan(&stackStr, &cnt); err != nil {
+			return err
+		}
+		stack := parseStackArray(stackStr)
+		formatted := formatStack(stack, 80)
+		// If the leaf frame is a runtime/sync function that formatStack filters
+		// out, show it in brackets so that entries differing only in their
+		// blocking primitive (e.g. Cond.Wait vs Mutex.Lock) remain distinct.
+		if len(stack) > 0 && !isInterestingFrame(stack[0]) {
+			leaf := shortenFuncName(stack[0])
+			fmt.Fprintf(w, "     Blocked at (%d): %s [%s]\n", cnt, formatted, leaf)
+		} else {
+			fmt.Fprintf(w, "     Blocked at (%d): %s\n", cnt, formatted)
+		}
+	}
+	return rows.Err()
+}
+
+// printHeavyUnblockers shows individual goroutines that unblocked the most
+// other goroutines in the burst window. This pinpoints the root-cause goroutine
+// driving the burst (e.g., the raftTickLoop goroutine that wakes hundreds of
+// raft scheduler workers via Cond.Broadcast).
+func printHeavyUnblockers(db *sql.DB, w io.Writer, runnableStartNs int64) error {
+	rows, err := db.Query(`
+		WITH burst_unblocks AS (
+			SELECT src_g, src_stack_id
+			FROM g_transitions
+			WHERE to_state = 'runnable'
+			  AND from_state = 'waiting'
+			  AND end_time_ns - duration_ns BETWEEN $1 - 1000000 AND $1 + 1000000
+			  AND src_g IS NOT NULL
+		),
+		by_unblocker AS (
+			SELECT
+				src_g,
+				mode(src_stack_id) as common_stack_id,
+				COUNT(*) as cnt
+			FROM burst_unblocks
+			GROUP BY src_g
+			ORDER BY cnt DESC
+			LIMIT $2
+		)
+		SELECT
+			bu.src_g,
+			s.funcs::VARCHAR as unblocker_funcs,
+			bu.cnt
+		FROM by_unblocker bu
+		LEFT JOIN stacks s ON bu.common_stack_id = s.stack_id
+		ORDER BY bu.cnt DESC, bu.src_g
+	`, runnableStartNs, 3)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var srcG int64
+		var stackStr sql.NullString
+		var cnt int
+		if err := rows.Scan(&srcG, &stackStr, &cnt); err != nil {
+			return err
+		}
+		if stackStr.Valid {
+			stack := parseStackArray(stackStr.String)
+			fmt.Fprintf(w, "     Heavy unblocker G%d (%d): %s\n", srcG, cnt, formatStack(stack, 100))
+		} else {
+			fmt.Fprintf(w, "     Heavy unblocker G%d (%d): (unknown stack)\n", srcG, cnt)
 		}
 	}
 	return rows.Err()
@@ -924,8 +1072,8 @@ func parseStackArray(s string) []string {
 	return result
 }
 
-func printTopGoroutines(db *sql.DB) error {
-	fmt.Println("\n--- Top Goroutines by Wait Time ---")
+func printTopGoroutines(db *sql.DB, w io.Writer) error {
+	fmt.Fprintln(w, "\n--- Top Goroutines by Wait Time ---")
 
 	rows, err := db.Query(`
 		SELECT
@@ -959,8 +1107,8 @@ func printTopGoroutines(db *sql.DB) error {
 			return err
 		}
 		stack := parseStackArray(stackStr)
-		fmt.Printf("  G%-6d %s\n", g, formatStack(stack, 80))
-		fmt.Printf("          %d schedulings, total: %s, max: %s\n",
+		fmt.Fprintf(w, "  G%-6d %s\n", g, formatStack(stack, 80))
+		fmt.Fprintf(w, "          %d schedulings, total: %s, max: %s\n",
 			schedCount, fmtDuration(totalWait), fmtDuration(maxWait))
 	}
 	return rows.Err()
