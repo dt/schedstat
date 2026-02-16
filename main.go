@@ -19,19 +19,19 @@ import (
 )
 
 var opts struct {
-	window         time.Duration
-	spikeThreshold time.Duration
-	timeseries     bool
-	byCreator      bool
-	gc             bool
-	bursts         bool
-	worst          int
-	why            int
-	top            int
-	topWaiters     bool
-	keepDB         bool
-	sql            bool
-	verbose        bool
+	window             time.Duration
+	spikeThreshold     time.Duration
+	goroutineThreshold int
+	timeseries         bool
+	byCreator          bool
+	gc                 bool
+	bursts             bool
+	worst              int
+	top                int
+	topWaiters         bool
+	keepDB             bool
+	sql                bool
+	verbose            bool
 }
 
 func main() {
@@ -41,7 +41,8 @@ func main() {
 		Long: `schedstat analyzes Go execution traces and answers: "What's causing goroutines to wait?"
 
 Examples:
-  schedstat trace.out                # Summary + anomalies + root cause analysis
+  schedstat trace.out                # Summary + spike detection + spike details
+  schedstat -n 10 trace.out          # Show top 10 spikes per type (default 5)
   schedstat --bursts trace.out       # Detect goroutine launch bursts
   schedstat --sql trace.out          # Drop into DuckDB shell for custom queries`,
 		Args: cobra.MinimumNArgs(1),
@@ -66,13 +67,13 @@ Examples:
 	f := rootCmd.Flags()
 	f.DurationVarP(&opts.window, "window", "w", 100*time.Millisecond, "time window for analysis")
 	f.DurationVar(&opts.spikeThreshold, "spike-threshold", 1*time.Millisecond, "p99 threshold to highlight as anomaly")
+	f.IntVar(&opts.goroutineThreshold, "runnable-threshold", 0, "runnable goroutine count to highlight as anomaly (0 = 5*GOMAXPROCS)")
 	f.BoolVar(&opts.timeseries, "timeseries", false, "show p99 latency per time window")
 	f.BoolVar(&opts.byCreator, "by-creator", false, "group delays by goroutine creator")
 	f.BoolVar(&opts.gc, "gc", false, "show GC-related state transitions")
 	f.BoolVar(&opts.bursts, "bursts", false, "show burst events and who launched delayed goroutines")
 	f.IntVar(&opts.worst, "worst", 0, "show N worst individual delays with stacks")
-	f.IntVar(&opts.why, "why", 5, "explain N worst delays: what caused the wait?")
-	f.IntVarP(&opts.top, "top", "n", 5, "number of entries in summaries")
+	f.IntVarP(&opts.top, "top", "n", 5, "number of spike listings and detail entries")
 	f.BoolVar(&opts.topWaiters, "top-waiters", false, "show goroutines with most total wait time")
 	f.BoolVar(&opts.keepDB, "keep-db", false, "keep DuckDB file after analysis")
 	f.BoolVar(&opts.sql, "sql", false, "drop into DuckDB shell after analysis")
@@ -175,6 +176,16 @@ func analyze(db *sql.DB, traceFile string, w io.Writer) error {
 	durationMs := float64(maxTime-minTime) / 1e6
 	fmt.Fprintf(w, "\nTrace duration: %.1fms\n", durationMs)
 
+	// Get processor count for goroutine threshold default
+	var procCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM procs`).Scan(&procCount); err != nil {
+		return fmt.Errorf("getting processor count: %w", err)
+	}
+	goroutineThreshold := opts.goroutineThreshold
+	if goroutineThreshold == 0 {
+		goroutineThreshold = 5 * procCount
+	}
+
 	// Always show overall stats
 	if err := printOverallStats(db, w); err != nil {
 		return err
@@ -187,9 +198,37 @@ func analyze(db *sql.DB, traceFile string, w io.Writer) error {
 		}
 	}
 
-	// Anomaly detection (always)
-	if err := printAnomalies(db, w, minTime, opts.window, opts.spikeThreshold); err != nil {
+	// Spike detection.
+	latencySpikes, totalLatency, err := queryLatencySpikes(db, minTime, opts.window, opts.spikeThreshold, opts.top)
+	if err != nil {
 		return err
+	}
+	runnableSpikes, totalRunnable, err := queryRunnableSpikes(db, minTime, opts.window, goroutineThreshold, opts.top)
+	if err != nil {
+		return err
+	}
+
+	// Assign display indices before printing so print functions are pure output.
+	idx := 1
+	for i := range latencySpikes {
+		latencySpikes[i].index = idx
+		idx++
+	}
+	for i := range runnableSpikes {
+		runnableSpikes[i].index = idx
+		idx++
+	}
+
+	printLatencySpikesSection(w, latencySpikes, totalLatency, opts.window, opts.spikeThreshold)
+	printRunnableSpikesSection(w, runnableSpikes, totalRunnable, opts.window, goroutineThreshold)
+
+	allSpikes := make([]spikeInfo, 0, len(latencySpikes)+len(runnableSpikes))
+	allSpikes = append(allSpikes, latencySpikes...)
+	allSpikes = append(allSpikes, runnableSpikes...)
+	if len(allSpikes) > 0 {
+		if err := printSpikeDetails(db, w, allSpikes, minTime, opts.window); err != nil {
+			return err
+		}
 	}
 
 	// By-creator analysis
@@ -216,13 +255,6 @@ func analyze(db *sql.DB, traceFile string, w io.Writer) error {
 	// Worst delays
 	if opts.worst > 0 {
 		if err := printWorstDelays(db, w, opts.worst); err != nil {
-			return err
-		}
-	}
-
-	// Root cause analysis
-	if opts.why > 0 {
-		if err := printWhyDelays(db, w, opts.why); err != nil {
 			return err
 		}
 	}
@@ -310,78 +342,153 @@ func printTimeseries(db *sql.DB, w io.Writer, minTime int64, window time.Duratio
 	return rows.Err()
 }
 
-func printAnomalies(db *sql.DB, w io.Writer, minTime int64, window, threshold time.Duration) error {
+type spikeType int
+
+const (
+	latencySpike spikeType = iota
+	runnableSpike
+)
+
+type spikeInfo struct {
+	index       int // sequential display number, assigned in analyze()
+	windowNum   int
+	startMs     float64
+	eventCount  int
+	p99         float64
+	maxLatency  float64
+	maxRunnable int
+	spikeType   spikeType
+}
+
+func queryLatencySpikes(db *sql.DB, minTime int64, window, threshold time.Duration, top int) ([]spikeInfo, int, error) {
 	windowNs := window.Nanoseconds()
 	thresholdNs := float64(threshold.Nanoseconds())
 
-	var spikeCount int
-	err := db.QueryRow(`
-		SELECT COUNT(*)
-		FROM (
-			SELECT PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ns) as p99
-			FROM g_transitions
-			WHERE from_state = 'runnable' AND to_state = 'running'
-			GROUP BY (end_time_ns - $1) // $2
-			HAVING p99 > $3
-		)
-	`, minTime, windowNs, thresholdNs).Scan(&spikeCount)
-	if err != nil {
-		return fmt.Errorf("counting spikes: %w", err)
-	}
-
-	fmt.Fprintf(w, "\n--- Anomalies (p99 > %s per %s) ---\n", threshold, window)
-
-	if spikeCount == 0 {
-		fmt.Fprintln(w, "No anomalies detected.")
-		return nil
-	}
-
-	fmt.Fprintf(w, "%d window(s) with elevated latency\n\n", spikeCount)
-
 	rows, err := db.Query(`
-		WITH windowed AS (
+		WITH spike_windows AS (
 			SELECT
 				(end_time_ns - $1) // $2 as window_num,
-				duration_ns,
-				g
-			FROM g_transitions
-			WHERE from_state = 'runnable' AND to_state = 'running'
-		),
-		window_stats AS (
-			SELECT
-				window_num,
-				window_num * $2 / 1e6 as start_ms,
+				((end_time_ns - $1) // $2) * $2 / 1e6 as start_ms,
 				COUNT(*) as event_count,
-				COUNT(DISTINCT g) as goroutine_count,
 				PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ns) as p99,
 				MAX(duration_ns) as max_latency
-			FROM windowed
+			FROM g_transitions
+			WHERE from_state = 'runnable' AND to_state = 'running'
 			GROUP BY 1, 2
 			HAVING p99 > $3
 		)
-		SELECT window_num, start_ms, event_count, goroutine_count, p99, max_latency
-		FROM window_stats
+		SELECT *, COUNT(*) OVER() as total
+		FROM spike_windows
 		ORDER BY p99 DESC
 		LIMIT $4
-	`, minTime, windowNs, thresholdNs, opts.top)
+	`, minTime, windowNs, thresholdNs, top)
 	if err != nil {
-		return fmt.Errorf("anomaly query: %w", err)
+		return nil, 0, fmt.Errorf("latency spikes query: %w", err)
 	}
 	defer rows.Close()
 
+	var spikes []spikeInfo
+	var total int
 	for rows.Next() {
-		var windowNum int
-		var startMs float64
-		var eventCount, goroutineCount int
-		var p99, maxLatency float64
-		if err := rows.Scan(&windowNum, &startMs, &eventCount, &goroutineCount, &p99, &maxLatency); err != nil {
-			return err
+		var s spikeInfo
+		s.spikeType = latencySpike
+		if err := rows.Scan(&s.windowNum, &s.startMs, &s.eventCount, &s.p99, &s.maxLatency, &total); err != nil {
+			return nil, 0, err
 		}
-		fmt.Fprintf(w, "  t=%-6.0fms  p99=%-10s  max=%-10s  %d events, %d goroutines\n",
-			startMs, fmtDuration(p99), fmtDuration(maxLatency), eventCount, goroutineCount)
+		spikes = append(spikes, s)
+	}
+	return spikes, total, rows.Err()
+}
+
+func queryRunnableSpikes(db *sql.DB, minTime int64, window time.Duration, runnableThreshold, top int) ([]spikeInfo, int, error) {
+	windowMs := window.Milliseconds()
+
+	rows, err := db.Query(`
+		WITH buckets AS (
+			SELECT
+				(end_time_ns - $1) // 1000000 as bucket_ms,
+				COUNT(*) FILTER (WHERE to_state = 'runnable') as enter,
+				COUNT(*) FILTER (WHERE from_state = 'runnable') as leave
+			FROM g_transitions
+			WHERE from_state = 'runnable' OR to_state = 'runnable'
+			GROUP BY bucket_ms
+		),
+		-- Cumulative runnable count. This assumes zero runnable goroutines at
+		-- trace start, which is approximate but sufficient for spike detection.
+		running AS (
+			SELECT
+				bucket_ms,
+				SUM(enter - leave) OVER (ORDER BY bucket_ms) as runnable_count
+			FROM buckets
+		),
+		window_max AS (
+			SELECT
+				bucket_ms // $2 as window_num,
+				MAX(runnable_count) as max_runnable
+			FROM running
+			GROUP BY window_num
+			HAVING max_runnable > $3
+		)
+		SELECT window_num, max_runnable, COUNT(*) OVER() as total
+		FROM window_max
+		ORDER BY max_runnable DESC
+		LIMIT $4
+	`, minTime, windowMs, runnableThreshold, top)
+	if err != nil {
+		return nil, 0, fmt.Errorf("runnable spikes query: %w", err)
+	}
+	defer rows.Close()
+
+	var spikes []spikeInfo
+	var total int
+	for rows.Next() {
+		var s spikeInfo
+		s.spikeType = runnableSpike
+		if err := rows.Scan(&s.windowNum, &s.maxRunnable, &total); err != nil {
+			return nil, 0, err
+		}
+		s.startMs = float64(s.windowNum) * float64(windowMs)
+		spikes = append(spikes, s)
+	}
+	return spikes, total, rows.Err()
+}
+
+func printLatencySpikesSection(w io.Writer, spikes []spikeInfo, total int, window, threshold time.Duration) {
+	if total == 0 {
+		return
 	}
 
-	return rows.Err()
+	fmt.Fprintf(w, "\n--- Latency Spikes (p99 > %s per %s) ---\n", threshold, window)
+	if total > len(spikes) {
+		fmt.Fprintf(w, "%d window(s) above threshold (showing top %d)\n", total, len(spikes))
+	} else {
+		fmt.Fprintf(w, "%d window(s) above threshold\n", total)
+	}
+	fmt.Fprintln(w)
+
+	for _, s := range spikes {
+		fmt.Fprintf(w, "  [%d] t=%.0fms  p99=%s  max=%s  %d events\n",
+			s.index, s.startMs, fmtDuration(s.p99), fmtDuration(s.maxLatency), s.eventCount)
+	}
+}
+
+func printRunnableSpikesSection(w io.Writer, spikes []spikeInfo, total int, window time.Duration, runnableThreshold int) {
+	if total == 0 {
+		return
+	}
+
+	fmt.Fprintf(w, "\n--- Runnable Spikes (>%d runnable per %s) ---\n", runnableThreshold, window)
+	if total > len(spikes) {
+		fmt.Fprintf(w, "%d window(s) above threshold (showing top %d)\n", total, len(spikes))
+	} else {
+		fmt.Fprintf(w, "%d window(s) above threshold\n", total)
+	}
+	fmt.Fprintln(w)
+
+	for _, s := range spikes {
+		fmt.Fprintf(w, "  [%d] t=%.0fms  peak %d runnable\n",
+			s.index, s.startMs, s.maxRunnable)
+	}
 }
 
 func printByCreator(db *sql.DB, w io.Writer) error {
@@ -620,130 +727,177 @@ func printWorstDelays(db *sql.DB, w io.Writer, n int) error {
 	return rows.Err()
 }
 
-func printWhyDelays(db *sql.DB, w io.Writer, n int) error {
-	fmt.Fprintf(w, "\n--- Why Did the %d Worst Delays Happen? ---\n", n)
+func printSpikeDetails(db *sql.DB, w io.Writer, spikes []spikeInfo, minTime int64, window time.Duration) error {
+	fmt.Fprintf(w, "\n--- Spike Details ---\n")
 
-	// Get worst delays with their P and time window
-	rows, err := db.Query(`
+	windowNs := window.Nanoseconds()
+
+	for _, s := range spikes {
+		fmt.Fprintln(w)
+		if s.spikeType == latencySpike {
+			fmt.Fprintf(w, "[%d] t=%.0fms [latency] p99=%s\n", s.index, s.startMs, fmtDuration(s.p99))
+			if err := printLatencySpikeDetail(db, w, s, minTime, windowNs); err != nil {
+				return err
+			}
+		} else {
+			fmt.Fprintf(w, "[%d] t=%.0fms [runnable] peak %d runnable\n", s.index, s.startMs, s.maxRunnable)
+			if err := printRunnableSpikeDetail(db, w, s, minTime, window); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func printLatencySpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime, windowNs int64) error {
+	windowStart := minTime + int64(s.windowNum)*windowNs
+	windowEnd := windowStart + windowNs
+
+	// Find the worst individual delay within this window.
+	// Latency spikes filter by wait_start (end_time_ns - duration_ns) because
+	// that's when the goroutine entered the runnable state — the event that
+	// defines which window a scheduling delay belongs to.
+	var g int64
+	var durationNs float64
+	var endTime, waitStart int64
+	var srcP sql.NullInt64
+	err := db.QueryRow(`
 		SELECT g, duration_ns, end_time_ns, src_p,
 		       end_time_ns - duration_ns AS wait_start
 		FROM g_transitions
 		WHERE from_state = 'runnable' AND to_state = 'running'
+		  AND end_time_ns - duration_ns >= $1
+		  AND end_time_ns - duration_ns < $2
 		ORDER BY duration_ns DESC
-		LIMIT $1
-	`, n)
+		LIMIT 1
+	`, windowStart, windowEnd).Scan(&g, &durationNs, &endTime, &srcP, &waitStart)
 	if err != nil {
-		return fmt.Errorf("why delays query: %w", err)
-	}
-	defer rows.Close()
-
-	type delayInfo struct {
-		g          int64
-		durationNs float64
-		endTime    int64
-		waitStart  int64
-		srcP       sql.NullInt64
-	}
-	var delays []delayInfo
-	for rows.Next() {
-		var d delayInfo
-		if err := rows.Scan(&d.g, &d.durationNs, &d.endTime, &d.srcP, &d.waitStart); err != nil {
-			return err
+		if err == sql.ErrNoRows {
+			return nil
 		}
-		delays = append(delays, d)
-	}
-	if err := rows.Err(); err != nil {
-		return err
+		return fmt.Errorf("worst delay query: %w", err)
 	}
 
-	// For each delay, analyze WHY this goroutine had to wait
-	for i, d := range delays {
-		fmt.Fprintf(w, "\n%d. G%d waited %s", i+1, d.g, fmtDuration(d.durationNs))
-		if d.srcP.Valid {
-			fmt.Fprintf(w, " on P%d", d.srcP.Int64)
-		}
-		fmt.Fprintln(w)
+	fmt.Fprintf(w, "   → G%d waited %s", g, fmtDuration(durationNs))
+	if srcP.Valid {
+		fmt.Fprintf(w, " on P%d", srcP.Int64)
+	}
+	fmt.Fprintln(w)
 
-		// Question 1: Was there a burst of goroutines becoming runnable?
-		// Count how many goroutines became runnable within 1ms of when this G became runnable
-		var burstCount int
-		err := db.QueryRow(`
-			SELECT COUNT(DISTINCT g)
+	// Was there a burst of goroutines becoming runnable?
+	var burstCount int
+	err = db.QueryRow(`
+		SELECT COUNT(DISTINCT g)
+		FROM g_transitions
+		WHERE (to_state = 'runnable' OR (from_state = 'notexist' AND to_state = 'running'))
+		  AND end_time_ns - duration_ns BETWEEN $1 - 1000000 AND $1 + 1000000
+	`, waitStart).Scan(&burstCount)
+	if err != nil {
+		return fmt.Errorf("burst query: %w", err)
+	}
+
+	// Was there a long-running goroutine that blocked the queue?
+	var longestRunNs sql.NullFloat64
+	var longestRunG sql.NullInt64
+	var longestRunStack sql.NullString
+	if srcP.Valid {
+		err = db.QueryRow(`
+			SELECT duration_ns, g, stack_funcs(stack_id)::VARCHAR
 			FROM g_transitions
-			WHERE (to_state = 'runnable' OR (from_state = 'notexist' AND to_state = 'running'))
-			  AND end_time_ns - duration_ns BETWEEN $1 - 1000000 AND $1 + 1000000
-		`, d.waitStart).Scan(&burstCount)
+			WHERE from_state = 'running'
+			  AND src_p = $1
+			  AND end_time_ns > $2
+			  AND end_time_ns - duration_ns < $3
+			ORDER BY duration_ns DESC
+			LIMIT 1
+		`, srcP.Int64, waitStart, endTime).Scan(&longestRunNs, &longestRunG, &longestRunStack)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("longest run query: %w", err)
+		}
+	}
+
+	// How many goroutines ran during the wait?
+	var runnersCount, totalRuns int
+	if srcP.Valid {
+		err = db.QueryRow(`
+			SELECT COUNT(DISTINCT g), COUNT(*)
+			FROM g_transitions
+			WHERE from_state = 'running'
+			  AND src_p = $1
+			  AND end_time_ns > $2
+			  AND end_time_ns - duration_ns < $3
+		`, srcP.Int64, waitStart, endTime).Scan(&runnersCount, &totalRuns)
 		if err != nil {
-			return fmt.Errorf("burst query: %w", err)
+			return fmt.Errorf("runners count query: %w", err)
 		}
+	}
 
-		// Question 2: Was there a long-running goroutine that blocked the queue?
-		// Find the longest single run during the wait window on this P
-		var longestRunNs sql.NullFloat64
-		var longestRunG sql.NullInt64
-		var longestRunStack sql.NullString
-		if d.srcP.Valid {
-			err = db.QueryRow(`
-				SELECT duration_ns, g, stack_funcs(stack_id)::VARCHAR
-				FROM g_transitions
-				WHERE from_state = 'running'
-				  AND src_p = $1
-				  AND end_time_ns > $2
-				  AND end_time_ns - duration_ns < $3
-				ORDER BY duration_ns DESC
-				LIMIT 1
-			`, d.srcP.Int64, d.waitStart, d.endTime).Scan(&longestRunNs, &longestRunG, &longestRunStack)
-			if err != nil && err != sql.ErrNoRows {
-				return fmt.Errorf("longest run query: %w", err)
-			}
+	// Report findings
+	if burstCount > 10 {
+		fmt.Fprintf(w, "   → Burst: %d goroutines became runnable within ±1ms\n", burstCount)
+		if err := printBurstBreakdown(db, w, waitStart); err != nil {
+			fmt.Fprintf(w, "     (burst breakdown error: %v)\n", err)
 		}
+	}
 
-		// Question 3: How many goroutines ran during the wait?
-		var runnersCount, totalRuns int
-		if d.srcP.Valid {
-			err = db.QueryRow(`
-				SELECT COUNT(DISTINCT g), COUNT(*)
-				FROM g_transitions
-				WHERE from_state = 'running'
-				  AND src_p = $1
-				  AND end_time_ns > $2
-				  AND end_time_ns - duration_ns < $3
-			`, d.srcP.Int64, d.waitStart, d.endTime).Scan(&runnersCount, &totalRuns)
-			if err != nil {
-				return fmt.Errorf("runners count query: %w", err)
-			}
+	if longestRunNs.Valid && longestRunNs.Float64 > 500000 { // > 500µs
+		stack := parseStackArray(longestRunStack.String)
+		fmt.Fprintf(w, "   → Longest run during wait: G%d ran %s\n",
+			longestRunG.Int64, fmtDuration(longestRunNs.Float64))
+		if len(stack) > 0 {
+			fmt.Fprintf(w, "     %s\n", formatStack(stack, 80))
 		}
+	}
 
-		// Report findings
-		if burstCount > 10 {
-			fmt.Fprintf(w, "   → Burst: %d goroutines became runnable within ±1ms\n", burstCount)
-			// Show detailed burst breakdown
-			if err := printBurstBreakdown(db, w, d.waitStart); err != nil {
-				// Non-fatal: just skip the breakdown on error
-				if opts.verbose {
-					fmt.Fprintf(w, "     (burst breakdown unavailable: %v)\n", err)
-				}
-			}
-		}
+	if runnersCount > 0 {
+		fmt.Fprintf(w, "   → Queue activity: %d goroutines ran %d times during the wait\n",
+			runnersCount, totalRuns)
+	}
 
-		if longestRunNs.Valid && longestRunNs.Float64 > 500000 { // > 500µs
-			stack := parseStackArray(longestRunStack.String)
-			fmt.Fprintf(w, "   → Longest run during wait: G%d ran %s\n",
-				longestRunG.Int64, fmtDuration(longestRunNs.Float64))
-			if len(stack) > 0 {
-				fmt.Fprintf(w, "     %s\n", formatStack(stack, 80))
-			}
-		}
+	if burstCount <= 10 && (!longestRunNs.Valid || longestRunNs.Float64 <= 500000) && runnersCount == 0 {
+		fmt.Fprintln(w, "   → No clear single cause identified")
+	}
 
-		if runnersCount > 0 {
-			fmt.Fprintf(w, "   → Queue activity: %d goroutines ran %d times during the wait\n",
-				runnersCount, totalRuns)
-		}
+	return nil
+}
 
-		// If nothing notable, say so
-		if burstCount <= 10 && (!longestRunNs.Valid || longestRunNs.Float64 <= 500000) && runnersCount == 0 {
-			fmt.Fprintln(w, "   → No clear single cause identified")
+func printRunnableSpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime int64, window time.Duration) error {
+	windowMs := window.Milliseconds()
+	windowStartMs := int64(s.windowNum) * windowMs
+	windowEndMs := windowStartMs + windowMs
+
+	// Find the 1ms bucket within the window where most goroutines became runnable.
+	// Runnable spikes use end_time_ns for bucketing (the transition completion
+	// time) rather than wait_start, since we're counting state transitions into
+	// "runnable" — a different semantic than latency spike detection.
+	var peakBucketMs int64
+	err := db.QueryRow(`
+		SELECT bucket_ms
+		FROM (
+			SELECT
+				(end_time_ns - $1) // 1000000 as bucket_ms,
+				COUNT(*) as enter_count
+			FROM g_transitions
+			WHERE to_state = 'runnable'
+			  AND (end_time_ns - $1) // 1000000 >= $2
+			  AND (end_time_ns - $1) // 1000000 < $3
+			GROUP BY bucket_ms
+		)
+		ORDER BY enter_count DESC
+		LIMIT 1
+	`, minTime, windowStartMs, windowEndMs).Scan(&peakBucketMs)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
 		}
+		return fmt.Errorf("peak bucket query: %w", err)
+	}
+
+	peakNs := minTime + peakBucketMs*1000000
+
+	if err := printBurstBreakdown(db, w, peakNs); err != nil {
+		fmt.Fprintf(w, "     (burst breakdown error: %v)\n", err)
 	}
 
 	return nil
@@ -1006,7 +1160,7 @@ func printHeavyUnblockers(db *sql.DB, w io.Writer, runnableStartNs int64) error 
 				COUNT(*) as cnt
 			FROM burst_unblocks
 			GROUP BY src_g
-			ORDER BY cnt DESC
+			ORDER BY cnt DESC, src_g
 			LIMIT $2
 		)
 		SELECT

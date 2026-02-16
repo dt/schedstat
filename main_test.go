@@ -13,6 +13,45 @@ import (
 
 var rewrite = flag.Bool("rewrite", false, "regenerate golden output files in testdata/")
 
+// testOpts returns a default opts struct suitable for deterministic tests.
+// Callers override individual fields as needed.
+func testOpts() struct {
+	window             time.Duration
+	spikeThreshold     time.Duration
+	goroutineThreshold int
+	timeseries         bool
+	byCreator          bool
+	gc                 bool
+	bursts             bool
+	worst              int
+	top                int
+	topWaiters         bool
+	keepDB             bool
+	sql                bool
+	verbose            bool
+} {
+	return struct {
+		window             time.Duration
+		spikeThreshold     time.Duration
+		goroutineThreshold int
+		timeseries         bool
+		byCreator          bool
+		gc                 bool
+		bursts             bool
+		worst              int
+		top                int
+		topWaiters         bool
+		keepDB             bool
+		sql                bool
+		verbose            bool
+	}{
+		window:             100 * time.Millisecond,
+		spikeThreshold:     1 * time.Millisecond,
+		goroutineThreshold: 40, // fixed value for deterministic output
+		top:                5,
+	}
+}
+
 // TestGoldenOutput runs schedstat on each .bin trace file in testdata/ and
 // compares the output against the corresponding .txt golden file. When invoked
 // with -rewrite, the golden files are regenerated instead.
@@ -34,26 +73,7 @@ func TestGoldenOutput(t *testing.T) {
 	}
 
 	// Use fixed flags for deterministic output.
-	opts = struct {
-		window         time.Duration
-		spikeThreshold time.Duration
-		timeseries     bool
-		byCreator      bool
-		gc             bool
-		bursts         bool
-		worst          int
-		why            int
-		top            int
-		topWaiters     bool
-		keepDB         bool
-		sql            bool
-		verbose        bool
-	}{
-		window:         100 * time.Millisecond,
-		spikeThreshold: 1 * time.Millisecond,
-		why:            5,
-		top:            5,
-	}
+	opts = testOpts()
 
 	for _, traceFile := range traces {
 		name := strings.TrimSuffix(filepath.Base(traceFile), ".bin")
@@ -82,6 +102,42 @@ func TestGoldenOutput(t *testing.T) {
 			if got != string(want) {
 				t.Errorf("output mismatch for %s (run with -rewrite to update)\n\n%s",
 					traceFile, lineDiff(string(want), got))
+			}
+		})
+	}
+}
+
+// TestGoroutineThreshold verifies that the goroutine threshold triggers
+// appropriately at different levels.
+func TestGoroutineThreshold(t *testing.T) {
+	traceFile := "testdata/experiment-upsert1000-gateway.bin"
+	if _, err := os.Stat(traceFile); os.IsNotExist(err) {
+		t.Skip("test trace not available")
+	}
+
+	tests := []struct {
+		name               string
+		goroutineThreshold int
+		wantGoroutineSpikes bool
+	}{
+		{"low_threshold_triggers", 80, true},
+		{"high_threshold_no_trigger", 3000, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts = testOpts()
+			opts.goroutineThreshold = tc.goroutineThreshold
+
+			var buf bytes.Buffer
+			if err := runAnalysis(traceFile, &buf); err != nil {
+				t.Fatalf("runAnalysis: %v", err)
+			}
+			output := buf.String()
+
+			hasGoroutineSpikes := strings.Contains(output, "Runnable Spikes")
+			if hasGoroutineSpikes != tc.wantGoroutineSpikes {
+				t.Errorf("goroutine spikes: got %v, want %v", hasGoroutineSpikes, tc.wantGoroutineSpikes)
 			}
 		})
 	}

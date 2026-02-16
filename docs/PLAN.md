@@ -21,18 +21,20 @@ trace.out → sqlprof → DuckDB → schedstat queries → formatted output
 ### CLI Interface
 
 ```bash
-# Basic analysis (summary + anomalies + top goroutines)
+# Basic analysis (summary + spike detection + spike details)
 schedstat trace.out
 
-# Root cause analysis (recommended)
-schedstat --why=5 trace.out          # Explain 5 worst delays: what caused them?
-schedstat --bursts trace.out         # Detect goroutine launch bursts + who launched them
-
 # Additional analyses
+schedstat --bursts trace.out         # Detect goroutine launch bursts + who launched them
 schedstat --worst=20 trace.out       # N worst individual delays with stacks
 schedstat --timeseries trace.out     # p99 per time window
 schedstat --by-creator trace.out     # delays grouped by goroutine creator
 schedstat --gc trace.out             # GC-related state transitions
+
+# Tuning
+schedstat -n 10 trace.out            # show top 10 spikes per type (default 5)
+schedstat --spike-threshold=2ms trace.out  # only flag windows with p99 > 2ms
+schedstat --runnable-threshold=200 trace.out  # only flag windows with >200 runnable
 
 # Power user
 schedstat --sql trace.out            # drop into DuckDB shell after analysis
@@ -52,8 +54,10 @@ Runtime/stdlib frames are filtered out to focus on application code.
 
 1. **Trace duration** - orientation
 2. **Overall latency stats** - min, p50, p90, p99, max
-3. **Anomalies** - time windows where p99 exceeded threshold
-4. **Top goroutines** - which goroutines spent the most time waiting
+3. **Latency Spikes** - time windows where p99 exceeded threshold
+4. **Runnable Spikes** - time windows where runnable goroutine count exceeded threshold
+5. **Spike Details** - per-window root cause analysis (burst breakdown, heavy unblockers,
+   longest run, queue activity)
 
 ### Key Design Decisions
 
@@ -189,14 +193,15 @@ Based on real-world usage (e.g., Tobi's investigation):
 - [x] Delays by creator (`--by-creator`)
 - [x] GC-related transitions (`--gc`)
 - [x] Worst individual delays (`--worst=N`) with full stack paths
-- [x] **Root cause analysis** (`--why=N`) - For each delay, show what was running on the P
-      and whether it was a single blocker or runqueue saturation
+- [x] **Spike details** - Per-window root cause analysis: burst breakdown, heavy unblockers,
+      longest run during wait, queue activity (replaces old `--why` flag)
+- [x] **Runnable spike detection** - Time windows with high runnable goroutine count,
+      with burst breakdown at the peak entry-rate bucket
 - [x] **Burst detection** (`--bursts`) - When many goroutines became runnable at once
 - [x] **Who launched delayed goroutines** - What code path created goroutines that experienced delays
 
 ### To Add
-- [ ] **Runnable count over time** - How many goroutines were runnable at each point?
-      This is key for diagnosing "too many goroutines" situations.
+- [ ] **Per-bucket runnable chart** - Detailed timeseries of runnable goroutine count per 1ms bucket within a spike window.
 - [ ] **Processor utilization** - Were all Ps busy? Were some idle while work waited?
 - [ ] **Correlation with metrics** - Overlay scheduling latency with /gc/heap/allocs, etc.
 - [ ] **STW detection** - Identify stop-the-world pauses and their duration
