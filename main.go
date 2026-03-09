@@ -4,14 +4,13 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
-
-	"io"
 
 	"github.com/dt/schedstat/internal/tracedb"
 	_ "github.com/marcboeker/go-duckdb"
@@ -360,7 +359,9 @@ type spikeInfo struct {
 	spikeType   spikeType
 }
 
-func queryLatencySpikes(db *sql.DB, minTime int64, window, threshold time.Duration, top int) ([]spikeInfo, int, error) {
+func queryLatencySpikes(
+	db *sql.DB, minTime int64, window, threshold time.Duration, top int,
+) ([]spikeInfo, int, error) {
 	windowNs := window.Nanoseconds()
 	thresholdNs := float64(threshold.Nanoseconds())
 
@@ -400,7 +401,9 @@ func queryLatencySpikes(db *sql.DB, minTime int64, window, threshold time.Durati
 	return spikes, total, rows.Err()
 }
 
-func queryRunnableSpikes(db *sql.DB, minTime int64, window time.Duration, runnableThreshold, top int) ([]spikeInfo, int, error) {
+func queryRunnableSpikes(
+	db *sql.DB, minTime int64, window time.Duration, runnableThreshold, top int,
+) ([]spikeInfo, int, error) {
 	windowMs := window.Milliseconds()
 
 	rows, err := db.Query(`
@@ -453,7 +456,9 @@ func queryRunnableSpikes(db *sql.DB, minTime int64, window time.Duration, runnab
 	return spikes, total, rows.Err()
 }
 
-func printLatencySpikesSection(w io.Writer, spikes []spikeInfo, total int, window, threshold time.Duration) {
+func printLatencySpikesSection(
+	w io.Writer, spikes []spikeInfo, total int, window, threshold time.Duration,
+) {
 	if total == 0 {
 		return
 	}
@@ -472,7 +477,9 @@ func printLatencySpikesSection(w io.Writer, spikes []spikeInfo, total int, windo
 	}
 }
 
-func printRunnableSpikesSection(w io.Writer, spikes []spikeInfo, total int, window time.Duration, runnableThreshold int) {
+func printRunnableSpikesSection(
+	w io.Writer, spikes []spikeInfo, total int, window time.Duration, runnableThreshold int,
+) {
 	if total == 0 {
 		return
 	}
@@ -720,14 +727,16 @@ func printWorstDelays(db *sql.DB, w io.Writer, n int) error {
 			return err
 		}
 		stack := parseStackArray(stackStr)
-		fmt.Fprintf(w, "\n%d. G%d waited %s\n", rank, g, fmtDuration(durationNs))
+		fmt.Fprintf(w, "\n%d. g%d waited %s\n", rank, g, fmtDuration(durationNs))
 		fmt.Fprintf(w, "   %s\n", formatStack(stack, 100))
 		rank++
 	}
 	return rows.Err()
 }
 
-func printSpikeDetails(db *sql.DB, w io.Writer, spikes []spikeInfo, minTime int64, window time.Duration) error {
+func printSpikeDetails(
+	db *sql.DB, w io.Writer, spikes []spikeInfo, minTime int64, window time.Duration,
+) error {
 	fmt.Fprintf(w, "\n--- Spike Details ---\n")
 
 	windowNs := window.Nanoseconds()
@@ -779,7 +788,7 @@ func printLatencySpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime, wind
 		return fmt.Errorf("worst delay query: %w", err)
 	}
 
-	fmt.Fprintf(w, "   → G%d waited %s", g, fmtDuration(durationNs))
+	fmt.Fprintf(w, "   → g%d waited %s", g, fmtDuration(durationNs))
 	if srcP.Valid {
 		fmt.Fprintf(w, " on P%d", srcP.Int64)
 	}
@@ -843,7 +852,7 @@ func printLatencySpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime, wind
 
 	if longestRunNs.Valid && longestRunNs.Float64 > 500000 { // > 500µs
 		stack := parseStackArray(longestRunStack.String)
-		fmt.Fprintf(w, "   → Longest run during wait: G%d ran %s\n",
+		fmt.Fprintf(w, "   → Longest run during wait: g%d ran %s\n",
 			longestRunG.Int64, fmtDuration(longestRunNs.Float64))
 		if len(stack) > 0 {
 			fmt.Fprintf(w, "     %s\n", formatStack(stack, 80))
@@ -862,7 +871,9 @@ func printLatencySpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime, wind
 	return nil
 }
 
-func printRunnableSpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime int64, window time.Duration) error {
+func printRunnableSpikeDetail(
+	db *sql.DB, w io.Writer, s spikeInfo, minTime int64, window time.Duration,
+) error {
 	windowMs := window.Milliseconds()
 	windowStartMs := int64(s.windowNum) * windowMs
 	windowEndMs := windowStartMs + windowMs
@@ -1185,9 +1196,9 @@ func printHeavyUnblockers(db *sql.DB, w io.Writer, runnableStartNs int64) error 
 		}
 		if stackStr.Valid {
 			stack := parseStackArray(stackStr.String)
-			fmt.Fprintf(w, "     Heavy unblocker G%d (%d): %s\n", srcG, cnt, formatStack(stack, 100))
+			fmt.Fprintf(w, "     Heavy unblocker g%d (%d): %s\n", srcG, cnt, formatStack(stack, 100))
 		} else {
-			fmt.Fprintf(w, "     Heavy unblocker G%d (%d): (unknown stack)\n", srcG, cnt)
+			fmt.Fprintf(w, "     Heavy unblocker g%d (%d): (unknown stack)\n", srcG, cnt)
 		}
 	}
 	return rows.Err()
@@ -1261,7 +1272,7 @@ func printTopGoroutines(db *sql.DB, w io.Writer) error {
 			return err
 		}
 		stack := parseStackArray(stackStr)
-		fmt.Fprintf(w, "  G%-6d %s\n", g, formatStack(stack, 80))
+		fmt.Fprintf(w, "  g%-6d %s\n", g, formatStack(stack, 80))
 		fmt.Fprintf(w, "          %d schedulings, total: %s, max: %s\n",
 			schedCount, fmtDuration(totalWait), fmtDuration(maxWait))
 	}
