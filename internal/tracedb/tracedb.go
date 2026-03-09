@@ -98,6 +98,7 @@ func (db *DB) loadTrace(ctx context.Context, r io.Reader) (err error) {
 
 	gIdx := map[trace.GoID]*gState{}
 	pIdx := map[trace.ProcID]*pState{}
+	rIdx := map[rangeKey]*rangeState{}
 	for first := true; ; first = false {
 		var ev trace.Event
 		if ev, err = tr.ReadEvent(); err == io.EOF {
@@ -231,6 +232,46 @@ func (db *DB) loadTrace(ctx context.Context, r io.Reader) (err error) {
 				}
 				g.time = ev.Time()
 			}
+		case trace.EventRangeBegin, trace.EventRangeActive:
+			r := ev.Range()
+			key := rangeKey{
+				name:      r.Name,
+				scopeKind: r.Scope.Kind,
+				scopeID:   scopeIDFromRange(r),
+			}
+			rIdx[key] = &rangeState{
+				start:   ev.Time(),
+				stackID: srcStackID,
+				g:       ev.Goroutine(),
+				p:       ev.Proc(),
+			}
+		case trace.EventRangeEnd:
+			r := ev.Range()
+			key := rangeKey{
+				name:      r.Name,
+				scopeKind: r.Scope.Kind,
+				scopeID:   scopeIDFromRange(r),
+			}
+			rs, ok := rIdx[key]
+			if !ok {
+				break
+			}
+			delete(rIdx, key)
+			dt := uint64(ev.Time() - rs.start)
+			scopeKind, scopeID := scopeFromRange(r)
+			if err = l.Append("gc_ranges",
+				r.Name,
+				scopeKind,
+				scopeID,
+				uint64(rs.start),
+				uint64(ev.Time()),
+				dt,
+				nullableUint64(rs.stackID),
+				nullableResource(rs.g),
+				nullableResource(rs.p),
+			); err != nil {
+				return
+			}
 		}
 	}
 	return
@@ -265,6 +306,41 @@ type gState struct {
 
 type pState struct {
 	time trace.Time
+}
+
+type rangeKey struct {
+	name      string
+	scopeKind trace.ResourceKind
+	scopeID   int64
+}
+
+type rangeState struct {
+	start   trace.Time
+	stackID uint64
+	g       trace.GoID
+	p       trace.ProcID
+}
+
+func scopeFromRange(r trace.Range) (kind string, id any) {
+	switch r.Scope.Kind {
+	case trace.ResourceGoroutine:
+		return "goroutine", int64(r.Scope.Goroutine())
+	case trace.ResourceProc:
+		return "proc", int64(r.Scope.Proc())
+	default:
+		return "none", nil
+	}
+}
+
+func scopeIDFromRange(r trace.Range) int64 {
+	switch r.Scope.Kind {
+	case trace.ResourceGoroutine:
+		return int64(r.Scope.Goroutine())
+	case trace.ResourceProc:
+		return int64(r.Scope.Proc())
+	default:
+		return 0
+	}
 }
 
 func (db *DB) loader(ctx context.Context) (*loader, error) {
