@@ -183,3 +183,24 @@ Events: 1557821
      Heavy unblocker g278027 (125): (*Reader).Read → ReadHandle.SetReadValue → (*readEntry).setReadValue → (*shard).set
      Heavy unblocker g1032 (11): (*Store).enqueueRaftUpdateCheck → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
      Heavy unblocker g3947 (10): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+
+--- GC Analysis ---
+GC cycles: 2, total: 88.55ms, avg: 44.27ms, min: 31.41ms, max: 57.14ms
+  STW pauses: 5, total: 922.0µs, max: 429.4µs
+    GC sweep termination: 2 pauses, total 659.3µs, max 429.4µs
+    GC mark termination: 2 pauses, total 213.7µs, max 125.4µs
+    start trace: 1 pauses, total 49.0µs, max 49.0µs
+  Mark assist: 1039 events across 698 goroutines, total: 97.13ms, max single: 1.75ms
+    Top affected goroutines:
+      G1046     pkg/ts.(*poller).start.func1             97 assists, total 9.18ms, max 1.75ms
+      G2504794  cockroachdb/pebble.(*DB).flush           20 assists, total 5.54ms, max 1.67ms
+      G1055     util/stop.(*Stopper).RunAsyncTaskEx.func1 46 assists, total 3.53ms, max 181.4µs
+      G718      util/stop.(*Stopper).RunAsyncTaskEx.func1 40 assists, total 3.50ms, max 354.9µs
+      G720      util/stop.(*Stopper).RunAsyncTaskEx.func1 38 assists, total 2.81ms, max 149.8µs
+  Scheduling latency during GC vs normal:
+                   count      p50        p99        max       
+    During GC:     9730       79.7µs     16.28ms    21.76ms   
+    Non-GC:        1548091    41.3µs     3.16ms     7.58ms    
+    Ratio:                    1.9x       5.2x       2.9x      
+  Sweep: 3809 events, total: 2.90ms
+

@@ -190,3 +190,8 @@ Events: 163815
      Heavy unblocker g4203954368 (13): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
      Created by (1): (*IntentResolver).runAsyncTask → (*Stopper).RunAsyncTaskEx
      Created by (1): (*http2Server).operateHeaders → (*Server).serveStreams.func1
+
+--- GC Analysis ---
+GC cycles: 0
+  STW pauses: 1, total: 4.5µs, max: 4.5µs
+    start trace: 1 pauses, total 4.5µs, max 4.5µs
