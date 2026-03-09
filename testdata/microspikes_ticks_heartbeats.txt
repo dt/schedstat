@@ -29,7 +29,7 @@ Events: 163815
 --- Spike Details ---
 
 [1] t=2200ms [latency] p99=1.83ms
-   → G1927 waited 2.41ms on P9
+   → g1927 waited 2.41ms on P9
    → Burst: 93 goroutines became runnable within ±1ms
      Breakdown: 125 unblocked, 14 preempted, 3 new
      Unblocked by (45): selectnbsend
@@ -38,18 +38,18 @@ Events: 163815
      Blocked at (19): newHTTP2Client.func6 → (*loopyWriter).run → (*controlBuffer).get [selectgo]
      Blocked at (19): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (18): (*Stopper).RunAsyncTaskEx.func2 → (*RaftTransport).processQueue [selectgo]
-     Heavy unblocker G4203943013 (11): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G2159 (9): (*Store).sendQueuedHeartbeatsToNode → (*RaftTransport).SendAsync
-     Heavy unblocker G1994 (5): (*Store).processReady → (*Replica).sendRaftMessageRequest → (*RaftTransport).SendAsync
+     Heavy unblocker g4203943013 (11): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g2159 (9): (*Store).sendQueuedHeartbeatsToNode → (*RaftTransport).SendAsync
+     Heavy unblocker g1994 (5): (*Store).processReady → (*Replica).sendRaftMessageRequest → (*RaftTransport).SendAsync
      Created by (1): (*DistSender).sendPartialBatchAsync → (*Stopper).RunAsyncTaskEx
      Created by (1): (*pendingLeaseRequest).requestLeaseAsync → (*Stopper).RunAsyncTaskEx
      Created by (1): (*DistSender).divideAndSendParallelCommit → (*Stopper).RunAsyncTaskEx
-   → Longest run during wait: G2041 ran 646.3µs
+   → Longest run during wait: g2041 ran 646.3µs
      (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker
    → Queue activity: 21 goroutines ran 27 times during the wait
 
 [2] t=1200ms [latency] p99=1.76ms
-   → G2074 waited 2.43ms on P15
+   → g2074 waited 2.43ms on P15
    → Burst: 176 goroutines became runnable within ±1ms
      Breakdown: 329 unblocked, 13 preempted, 4 new
      Unblocked by (173): (*Cond).Broadcast
@@ -58,17 +58,17 @@ Events: 163815
      Blocked at (207): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (28): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Mutex).Lock]
      Blocked at (21): (*Store).processReady → (*Replica).maybeCoalesceHeartbeat [(*Mutex).Lock]
-     Heavy unblocker G2158 (129): (*Store).raftTickLoop → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203943013 (45): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203890404 (10): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g2158 (129): (*Store).raftTickLoop → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203943013 (45): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203890404 (10): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
      Created by (3): (*http2Server).operateHeaders → (*Server).serveStreams.func1
      Created by (1): (*txnCommitter).makeTxnCommitExplicitAsync → (*Stopper).RunAsyncTaskEx
-   → Longest run during wait: G1936 ran 620.1µs
+   → Longest run during wait: g1936 ran 620.1µs
      (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker
    → Queue activity: 9 goroutines ran 10 times during the wait
 
 [3] t=1700ms [latency] p99=1.74ms
-   → G1925 waited 2.23ms on P6
+   → g1925 waited 2.23ms on P6
    → Burst: 162 goroutines became runnable within ±1ms
      Breakdown: 352 unblocked, 7 preempted
      Unblocked by (262): (*Cond).Broadcast
@@ -77,15 +77,15 @@ Events: 163815
      Blocked at (277): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (16): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Mutex).Lock]
      Blocked at (12): (*Store).processReady → (*Replica).maybeCoalesceHeartbeat [(*Mutex).Lock]
-     Heavy unblocker G2158 (128): (*Store).raftTickLoop → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203943013 (120): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203944670 (12): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-   → Longest run during wait: G2100 ran 860.4µs
+     Heavy unblocker g2158 (128): (*Store).raftTickLoop → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203943013 (120): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203944670 (12): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+   → Longest run during wait: g2100 ran 860.4µs
      (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker
    → Queue activity: 10 goroutines ran 10 times during the wait
 
 [4] t=700ms [latency] p99=1.63ms
-   → G2069 waited 2.30ms on P15
+   → g2069 waited 2.30ms on P15
    → Burst: 173 goroutines became runnable within ±1ms
      Breakdown: 365 unblocked, 6 preempted, 2 new
      Unblocked by (243): (*Cond).Broadcast
@@ -94,14 +94,14 @@ Events: 163815
      Blocked at (262): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (23): (*Store).processReady → (*Replica).maybeCoalesceHeartbeat [(*Mutex).Lock]
      Blocked at (17): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Mutex).Lock]
-     Heavy unblocker G2158 (128): (*Store).raftTickLoop → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203943013 (102): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203944670 (12): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g2158 (128): (*Store).raftTickLoop → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203943013 (102): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203944670 (12): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
      Created by (2): (*http2Server).operateHeaders → (*Server).serveStreams.func1
    → Queue activity: 24 goroutines ran 26 times during the wait
 
 [5] t=2700ms [latency] p99=1.14ms
-   → G2073 waited 1.77ms on P10
+   → g2073 waited 1.77ms on P10
    → Burst: 168 goroutines became runnable within ±1ms
      Breakdown: 367 unblocked, 8 preempted
      Unblocked by (193): (*Cond).Broadcast
@@ -110,10 +110,10 @@ Events: 163815
      Blocked at (247): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (28): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Mutex).Lock]
      Blocked at (18): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Mutex).Lock]
-     Heavy unblocker G2158 (125): (*Store).raftTickLoop → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203943013 (78): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203954368 (9): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
-   → Longest run during wait: G2119 ran 670.5µs
+     Heavy unblocker g2158 (125): (*Store).raftTickLoop → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203943013 (78): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203954368 (9): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+   → Longest run during wait: g2119 ran 670.5µs
      (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker
    → Queue activity: 10 goroutines ran 10 times during the wait
 
@@ -125,9 +125,9 @@ Events: 163815
      Blocked at (306): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (85): (*Stopper).RunAsyncTaskEx.func2 → (*RaftTransport).processQueue [selectgo]
      Blocked at (77): newHTTP2Client.func6 → (*loopyWriter).run → (*controlBuffer).get [selectgo]
-     Heavy unblocker G2161 (57): (*Store).enqueueRaftUpdateCheck → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
-     Heavy unblocker G2160 (52): (*Store).enqueueRaftUpdateCheck → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
-     Heavy unblocker G2178 (49): (*Store).enqueueRaftUpdateCheck → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g2161 (57): (*Store).enqueueRaftUpdateCheck → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g2160 (52): (*Store).enqueueRaftUpdateCheck → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g2178 (49): (*Store).enqueueRaftUpdateCheck → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
      Created by (29): (*baseQueue).Async → (*Stopper).RunAsyncTaskEx
      Created by (10): (*http2Server).operateHeaders → (*Server).serveStreams.func1
      Created by (1): (*replicaScanner).waitAndProcess → (*baseQueue).Async → (*Stopper).RunAsyncTaskEx
@@ -140,9 +140,9 @@ Events: 163815
      Blocked at (247): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (18): newHTTP2Client.func6 → (*loopyWriter).run → (*controlBuffer).get [selectgo]
      Blocked at (17): (*Stopper).RunAsyncTaskEx.func2 → (*RaftTransport).processQueue [selectgo]
-     Heavy unblocker G4203956581 (113): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G9828 (34): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203954980 (13): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g4203956581 (113): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g9828 (34): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203954980 (13): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
      Created by (2): (*http2Server).operateHeaders → (*Server).serveStreams.func1
      Created by (1): (*replicaScanner).waitAndProcess → (*baseQueue).Async → (*Stopper).RunAsyncTaskEx
      Created by (1): (*replicaScanner).waitAndProcess → (*baseQueue).Async → (*Stopper).RunAsyncTaskEx
@@ -155,9 +155,9 @@ Events: 163815
      Blocked at (143): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (18): newHTTP2Client.func6 → (*loopyWriter).run → (*controlBuffer).get [selectgo]
      Blocked at (16): (*Stopper).RunAsyncTaskEx.func2 → (*RaftTransport).processQueue [selectgo]
-     Heavy unblocker G2633 (15): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
-     Heavy unblocker G4203954368 (15): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
-     Heavy unblocker G4203890404 (14): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g2633 (15): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g4203954368 (15): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g4203890404 (14): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
      Created by (1): (*IntentResolver).runAsyncTask → (*Stopper).RunAsyncTaskEx
      Created by (1): (*IntentResolver).cleanupFinishedTxnIntents → (*Stopper).RunAsyncTaskEx
      Created by (1): (*http2Server).operateHeaders → (*Server).serveStreams.func1
@@ -170,9 +170,9 @@ Events: 163815
      Blocked at (137): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (23): (*Store).processReady → (*Replica).maybeCoalesceHeartbeat [(*Mutex).Lock]
      Blocked at (18): newHTTP2Client.func6 → (*loopyWriter).run → (*controlBuffer).get [selectgo]
-     Heavy unblocker G4203890404 (24): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
-     Heavy unblocker G4203954368 (15): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
-     Heavy unblocker G990213 (12): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g4203890404 (24): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g4203954368 (15): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g990213 (12): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
      Created by (1): (*DistSender).sendPartialBatchAsync → (*Stopper).RunAsyncTaskEx
      Created by (1): (*baseQueue).Async → (*Stopper).RunAsyncTaskEx
      Created by (1): (*RequestBatcher).sendBatch → (*Stopper).RunAsyncTaskEx
@@ -185,8 +185,8 @@ Events: 163815
      Blocked at (254): (*raftScheduler).Start.func2 → (*raftSchedulerShard).worker [(*Cond).Wait]
      Blocked at (21): newHTTP2Client.func6 → (*loopyWriter).run → (*controlBuffer).get [selectgo]
      Blocked at (19): (*Buffer).ReadFrom → (*MuxConn).Read → (*conn).Read → (*netFD).Read [(*FD).Read]
-     Heavy unblocker G4203955801 (122): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
-     Heavy unblocker G4203890404 (22): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
-     Heavy unblocker G4203954368 (13): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g4203955801 (122): (*Store).uncoalesceBeats → (*raftScheduler).enqueueBatch → (*raftSchedulerShard).signal
+     Heavy unblocker g4203890404 (22): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
+     Heavy unblocker g4203954368 (13): (*Store).HandleRaftRequest → (*raftScheduler).enqueue1 → (*raftSchedulerShard).signal
      Created by (1): (*IntentResolver).runAsyncTask → (*Stopper).RunAsyncTaskEx
      Created by (1): (*http2Server).operateHeaders → (*Server).serveStreams.func1
