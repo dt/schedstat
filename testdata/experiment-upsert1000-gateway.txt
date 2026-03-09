@@ -118,11 +118,11 @@ GC cycles: 1, total: 30.31ms, avg: 30.31ms, min: 30.31ms, max: 30.31ms
     start trace: 1 pauses, total 4.2µs, max 4.2µs
   Mark assist: 963 events across 836 goroutines, total: 93.39ms, max single: 1.26ms
     Top affected goroutines:
-      G1222     kv/kvserver.(*RaftTransport).raftMessageBatch.func1 95 assists, total 11.64ms, max 1.26ms
-      G1012     internal/transport.(*http2Client).reader 7 assists, total 1.05ms, max 313.7µs
-      G1285     kv/kvserver.(*RaftTransport).startProcessNewQueue.func3 7 assists, total 715.2µs, max 139.8µs
-      G916      util/stop.(*Stopper).RunAsyncTaskEx.func1 4 assists, total 594.2µs, max 296.7µs
-      G919      util/stop.(*Stopper).RunAsyncTaskEx.func1 4 assists, total 566.5µs, max 210.7µs
+      G1222     kv/kvserver.(*RaftTransport).raftMessageBatch.func1 95 assists, total 11.64ms, max 1.26ms @ t=4266ms
+      G1012     internal/transport.(*http2Client).reader 7 assists, total 1.05ms, max 313.7µs @ t=4255ms
+      G1285     kv/kvserver.(*RaftTransport).startProcessNewQueue.func3 7 assists, total 715.2µs, max 139.8µs @ t=4252ms
+      G916      util/stop.(*Stopper).RunAsyncTaskEx.func1 4 assists, total 594.2µs, max 296.7µs @ t=4250ms
+      G919      util/stop.(*Stopper).RunAsyncTaskEx.func1 4 assists, total 566.5µs, max 210.7µs @ t=4250ms
   Scheduling latency during GC vs normal:
                    count      p50        p99        max       
     During GC:     4969       74.6µs     7.51ms     9.44ms    

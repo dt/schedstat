@@ -680,12 +680,17 @@ func printMarkAssist(db *sql.DB, w io.Writer) error {
 
 	// Top affected goroutines
 	rows, err := db.Query(`
+		WITH t0 AS (
+			SELECT MIN(end_time_ns - duration_ns) as v FROM g_transitions
+			WHERE from_state = 'runnable' AND to_state = 'running'
+		)
 		SELECT
 			r.scope_id,
 			COALESCE(g.name, '(unknown)') as gname,
 			COUNT(*) as assists,
 			SUM(r.duration_ns) as total_assist_ns,
-			MAX(r.duration_ns) as max_assist_ns
+			MAX(r.duration_ns) as max_assist_ns,
+			(arg_max(r.start_time_ns, r.duration_ns) - (SELECT v FROM t0)) / 1e6 as worst_at_ms
 		FROM gc_ranges r
 		LEFT JOIN goroutines g ON r.scope_id = g.g
 		WHERE r.name = 'GC mark assist'
@@ -703,12 +708,12 @@ func printMarkAssist(db *sql.DB, w io.Writer) error {
 		var scopeID int64
 		var gname string
 		var assists int
-		var totalAssistNs, maxAssistNs float64
-		if err := rows.Scan(&scopeID, &gname, &assists, &totalAssistNs, &maxAssistNs); err != nil {
+		var totalAssistNs, maxAssistNs, worstAtMs float64
+		if err := rows.Scan(&scopeID, &gname, &assists, &totalAssistNs, &maxAssistNs, &worstAtMs); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "      G%-8d %-40s %d assists, total %s, max %s\n",
-			scopeID, shortenFunc(gname), assists, fmtDuration(totalAssistNs), fmtDuration(maxAssistNs))
+		fmt.Fprintf(w, "      G%-8d %-40s %d assists, total %s, max %s @ t=%.0fms\n",
+			scopeID, shortenFunc(gname), assists, fmtDuration(totalAssistNs), fmtDuration(maxAssistNs), worstAtMs)
 	}
 	return rows.Err()
 }
