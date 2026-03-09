@@ -69,7 +69,7 @@ Examples:
 	f.IntVar(&opts.goroutineThreshold, "runnable-threshold", 0, "runnable goroutine count to highlight as anomaly (0 = 5*GOMAXPROCS)")
 	f.BoolVar(&opts.timeseries, "timeseries", false, "show p99 latency per time window")
 	f.BoolVar(&opts.byCreator, "by-creator", false, "group delays by goroutine creator")
-	f.BoolVar(&opts.gc, "gc", false, "show GC-related state transitions")
+	f.BoolVar(&opts.gc, "gc", true, "show GC analysis from range events")
 	f.BoolVar(&opts.bursts, "bursts", false, "show burst events and who launched delayed goroutines")
 	f.IntVar(&opts.worst, "worst", 0, "show N worst individual delays with stacks")
 	f.IntVarP(&opts.top, "top", "n", 5, "number of spike listings and detail entries")
@@ -537,47 +537,323 @@ func printByCreator(db *sql.DB, w io.Writer) error {
 }
 
 func printGCAnalysis(db *sql.DB, w io.Writer) error {
-	fmt.Fprintln(w, "\n--- GC-Related Activity ---")
+	// Check if there's any GC data at all.
+	var totalRanges int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM gc_ranges`).Scan(&totalRanges); err != nil {
+		return fmt.Errorf("gc range count: %w", err)
+	}
+	if totalRanges == 0 {
+		return nil
+	}
 
+	fmt.Fprintln(w, "\n--- GC Analysis ---")
+
+	// 3a. GC Cycle Summary
+	if err := printGCCycleSummary(db, w); err != nil {
+		return err
+	}
+
+	// 3b. STW Summary
+	if err := printSTWSummary(db, w); err != nil {
+		return err
+	}
+
+	// 3c. Mark Assist
+	if err := printMarkAssist(db, w); err != nil {
+		return err
+	}
+
+	// 3d. Scheduling Latency: During GC vs Normal
+	if err := printGCLatencyComparison(db, w); err != nil {
+		return err
+	}
+
+	// 3e. Per-Cycle Breakdown (verbose only)
+	if opts.verbose {
+		if err := printPerCycleBreakdown(db, w); err != nil {
+			return err
+		}
+	}
+
+	// 3f. Sweep Summary
+	if err := printSweepSummary(db, w); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func printGCCycleSummary(db *sql.DB, w io.Writer) error {
+	var count int
+	var totalNs, avgNs, minNs, maxNs sql.NullFloat64
+	err := db.QueryRow(`
+		SELECT COUNT(*), SUM(duration_ns), AVG(duration_ns), MIN(duration_ns), MAX(duration_ns)
+		FROM gc_ranges
+		WHERE name = 'GC concurrent mark phase'
+	`).Scan(&count, &totalNs, &avgNs, &minNs, &maxNs)
+	if err != nil {
+		return fmt.Errorf("gc cycle summary: %w", err)
+	}
+	if count == 0 {
+		fmt.Fprintln(w, "GC cycles: 0")
+		return nil
+	}
+	fmt.Fprintf(w, "GC cycles: %d, total: %s, avg: %s, min: %s, max: %s\n",
+		count, fmtNullDuration(totalNs), fmtNullDuration(avgNs), fmtNullDuration(minNs), fmtNullDuration(maxNs))
+	return nil
+}
+
+func printSTWSummary(db *sql.DB, w io.Writer) error {
 	rows, err := db.Query(`
 		SELECT
-			from_state,
-			to_state,
-			reason,
-			COUNT(*) as transitions,
+			regexp_extract(name, '\((.*)\)', 1) as reason,
+			COUNT(*) as cnt,
 			SUM(duration_ns) as total_ns,
 			MAX(duration_ns) as max_ns
-		FROM g_transitions
-		WHERE reason LIKE '%GC%'
-		   OR reason LIKE '%gc%'
-		   OR from_state LIKE '%gc%'
-		   OR to_state LIKE '%gc%'
-		GROUP BY 1, 2, 3
+		FROM gc_ranges
+		WHERE name LIKE 'stop-the-world%'
+		GROUP BY 1
 		ORDER BY total_ns DESC
-		LIMIT $1
-	`, opts.top*2)
+	`)
 	if err != nil {
-		return fmt.Errorf("gc query: %w", err)
+		return fmt.Errorf("stw query: %w", err)
 	}
 	defer rows.Close()
 
-	hasRows := false
+	type stwEntry struct {
+		reason  string
+		count   int
+		totalNs float64
+		maxNs   float64
+	}
+	var entries []stwEntry
+	var totalCount int
+	var totalNs, overallMax float64
+
 	for rows.Next() {
-		hasRows = true
-		var fromState, toState, reason string
-		var transitions int
-		var totalNs, maxNs float64
-		if err := rows.Scan(&fromState, &toState, &reason, &transitions, &totalNs, &maxNs); err != nil {
+		var e stwEntry
+		if err := rows.Scan(&e.reason, &e.count, &e.totalNs, &e.maxNs); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "  %s → %s (%s)\n", fromState, toState, reason)
-		fmt.Fprintf(w, "    %d transitions, total: %s, max: %s\n",
-			transitions, fmtDuration(totalNs), fmtDuration(maxNs))
+		entries = append(entries, e)
+		totalCount += e.count
+		totalNs += e.totalNs
+		if e.maxNs > overallMax {
+			overallMax = e.maxNs
+		}
 	}
-	if !hasRows {
-		fmt.Fprintln(w, "  No GC-related transitions found.")
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if totalCount == 0 {
+		return nil
+	}
+
+	fmt.Fprintf(w, "  STW pauses: %d, total: %s, max: %s\n",
+		totalCount, fmtDuration(totalNs), fmtDuration(overallMax))
+	for _, e := range entries {
+		fmt.Fprintf(w, "    %s: %d pauses, total %s, max %s\n",
+			e.reason, e.count, fmtDuration(e.totalNs), fmtDuration(e.maxNs))
+	}
+	return nil
+}
+
+func printMarkAssist(db *sql.DB, w io.Writer) error {
+	var totalEvents int
+	var totalGoroutines int
+	var totalNs, maxSingleNs sql.NullFloat64
+	err := db.QueryRow(`
+		SELECT COUNT(*), COUNT(DISTINCT scope_id), SUM(duration_ns), MAX(duration_ns)
+		FROM gc_ranges
+		WHERE name = 'GC mark assist'
+	`).Scan(&totalEvents, &totalGoroutines, &totalNs, &maxSingleNs)
+	if err != nil {
+		return fmt.Errorf("mark assist summary: %w", err)
+	}
+	if totalEvents == 0 {
+		return nil
+	}
+
+	fmt.Fprintf(w, "  Mark assist: %d events across %d goroutines, total: %s, max single: %s\n",
+		totalEvents, totalGoroutines, fmtNullDuration(totalNs), fmtNullDuration(maxSingleNs))
+
+	// Top affected goroutines
+	rows, err := db.Query(`
+		WITH t0 AS (
+			SELECT MIN(end_time_ns - duration_ns) as v FROM g_transitions
+			WHERE from_state = 'runnable' AND to_state = 'running'
+		)
+		SELECT
+			r.scope_id,
+			COALESCE(g.name, '(unknown)') as gname,
+			COUNT(*) as assists,
+			SUM(r.duration_ns) as total_assist_ns,
+			MAX(r.duration_ns) as max_assist_ns,
+			(arg_max(r.start_time_ns, r.duration_ns) - (SELECT v FROM t0)) / 1e6 as worst_at_ms
+		FROM gc_ranges r
+		LEFT JOIN goroutines g ON r.scope_id = g.g
+		WHERE r.name = 'GC mark assist'
+		GROUP BY r.scope_id, gname
+		ORDER BY total_assist_ns DESC
+		LIMIT $1
+	`, opts.top)
+	if err != nil {
+		return fmt.Errorf("mark assist top goroutines: %w", err)
+	}
+	defer rows.Close()
+
+	fmt.Fprintln(w, "    Top affected goroutines:")
+	for rows.Next() {
+		var scopeID int64
+		var gname string
+		var assists int
+		var totalAssistNs, maxAssistNs, worstAtMs float64
+		if err := rows.Scan(&scopeID, &gname, &assists, &totalAssistNs, &maxAssistNs, &worstAtMs); err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "      G%-8d %-40s %d assists, total %s, max %s @ t=%.0fms\n",
+			scopeID, shortenFunc(gname), assists, fmtDuration(totalAssistNs), fmtDuration(maxAssistNs), worstAtMs)
 	}
 	return rows.Err()
+}
+
+func printGCLatencyComparison(db *sql.DB, w io.Writer) error {
+	// Check if we have any GC cycles to compare against
+	var cycleCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM gc_cycles`).Scan(&cycleCount); err != nil {
+		return fmt.Errorf("gc cycle count: %w", err)
+	}
+	if cycleCount == 0 {
+		return nil
+	}
+
+	type latencyStats struct {
+		count int
+		p50   sql.NullFloat64
+		p99   sql.NullFloat64
+		max   sql.NullFloat64
+	}
+
+	var duringGC, nonGC latencyStats
+	err := db.QueryRow(`
+		SELECT
+			COUNT(*),
+			PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY duration_ns),
+			PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ns),
+			MAX(duration_ns)
+		FROM g_transitions gt
+		WHERE from_state = 'runnable' AND to_state = 'running'
+		  AND EXISTS (
+			SELECT 1 FROM gc_cycles gc
+			WHERE gt.end_time_ns - gt.duration_ns < gc.end_time_ns
+			  AND gt.end_time_ns > gc.start_time_ns
+		  )
+	`).Scan(&duringGC.count, &duringGC.p50, &duringGC.p99, &duringGC.max)
+	if err != nil {
+		return fmt.Errorf("gc latency during: %w", err)
+	}
+
+	err = db.QueryRow(`
+		SELECT
+			COUNT(*),
+			PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY duration_ns),
+			PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ns),
+			MAX(duration_ns)
+		FROM g_transitions gt
+		WHERE from_state = 'runnable' AND to_state = 'running'
+		  AND NOT EXISTS (
+			SELECT 1 FROM gc_cycles gc
+			WHERE gt.end_time_ns - gt.duration_ns < gc.end_time_ns
+			  AND gt.end_time_ns > gc.start_time_ns
+		  )
+	`).Scan(&nonGC.count, &nonGC.p50, &nonGC.p99, &nonGC.max)
+	if err != nil {
+		return fmt.Errorf("gc latency non-gc: %w", err)
+	}
+
+	if duringGC.count == 0 {
+		return nil
+	}
+
+	fmt.Fprintln(w, "  Scheduling latency during GC vs normal:")
+	fmt.Fprintf(w, "    %-14s %-10s %-10s %-10s %-10s\n", "", "count", "p50", "p99", "max")
+	fmt.Fprintf(w, "    %-14s %-10d %-10s %-10s %-10s\n",
+		"During GC:", duringGC.count, fmtNullDuration(duringGC.p50), fmtNullDuration(duringGC.p99), fmtNullDuration(duringGC.max))
+	fmt.Fprintf(w, "    %-14s %-10d %-10s %-10s %-10s\n",
+		"Non-GC:", nonGC.count, fmtNullDuration(nonGC.p50), fmtNullDuration(nonGC.p99), fmtNullDuration(nonGC.max))
+
+	if nonGC.p50.Valid && nonGC.p50.Float64 > 0 && duringGC.p50.Valid {
+		p50Ratio := duringGC.p50.Float64 / nonGC.p50.Float64
+		p99Ratio := 0.0
+		if nonGC.p99.Valid && nonGC.p99.Float64 > 0 && duringGC.p99.Valid {
+			p99Ratio = duringGC.p99.Float64 / nonGC.p99.Float64
+		}
+		maxRatio := 0.0
+		if nonGC.max.Valid && nonGC.max.Float64 > 0 && duringGC.max.Valid {
+			maxRatio = duringGC.max.Float64 / nonGC.max.Float64
+		}
+		fmt.Fprintf(w, "    %-14s %-10s %-10s %-10s %-10s\n",
+			"Ratio:", "", fmt.Sprintf("%.1fx", p50Ratio), fmt.Sprintf("%.1fx", p99Ratio), fmt.Sprintf("%.1fx", maxRatio))
+	}
+
+	return nil
+}
+
+func printPerCycleBreakdown(db *sql.DB, w io.Writer) error {
+	rows, err := db.Query(`
+		SELECT
+			gc.cycle,
+			gc.duration_ns,
+			COUNT(r.name) as assists,
+			COUNT(DISTINCT r.scope_id) as goroutines,
+			COALESCE(SUM(r.duration_ns), 0) as assist_time_ns
+		FROM gc_cycles gc
+		LEFT JOIN gc_ranges r
+			ON r.name = 'GC mark assist'
+			AND r.start_time_ns < gc.end_time_ns
+			AND r.end_time_ns > gc.start_time_ns
+		GROUP BY gc.cycle, gc.duration_ns, gc.start_time_ns
+		ORDER BY gc.start_time_ns
+	`)
+	if err != nil {
+		return fmt.Errorf("per-cycle breakdown: %w", err)
+	}
+	defer rows.Close()
+
+	fmt.Fprintln(w, "  Per-cycle breakdown:")
+	fmt.Fprintf(w, "    %-6s %-12s %-8s %-12s %-12s\n", "Cycle", "Duration", "Assists", "Goroutines", "Assist Time")
+	for rows.Next() {
+		var cycle int
+		var durationNs float64
+		var assists, goroutines int
+		var assistTimeNs float64
+		if err := rows.Scan(&cycle, &durationNs, &assists, &goroutines, &assistTimeNs); err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "    %-6d %-12s %-8d %-12d %-12s\n",
+			cycle, fmtDuration(durationNs), assists, goroutines, fmtDuration(assistTimeNs))
+	}
+	return rows.Err()
+}
+
+func printSweepSummary(db *sql.DB, w io.Writer) error {
+	var count int
+	var totalNs sql.NullFloat64
+	err := db.QueryRow(`
+		SELECT COUNT(*), SUM(duration_ns)
+		FROM gc_ranges
+		WHERE name = 'GC incremental sweep'
+	`).Scan(&count, &totalNs)
+	if err != nil {
+		return fmt.Errorf("sweep summary: %w", err)
+	}
+	if count == 0 {
+		return nil
+	}
+	fmt.Fprintf(w, "  Sweep: %d events, total: %s\n",
+		count, fmtNullDuration(totalNs))
+	return nil
 }
 
 func printBurstAnalysis(db *sql.DB, w io.Writer, window time.Duration) error {

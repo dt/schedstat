@@ -48,6 +48,7 @@ func testOpts() struct {
 		window:             100 * time.Millisecond,
 		spikeThreshold:     1 * time.Millisecond,
 		goroutineThreshold: 40, // fixed value for deterministic output
+		gc:                 true,
 		top:                5,
 	}
 }
@@ -116,8 +117,8 @@ func TestGoroutineThreshold(t *testing.T) {
 	}
 
 	tests := []struct {
-		name               string
-		goroutineThreshold int
+		name                string
+		goroutineThreshold  int
 		wantGoroutineSpikes bool
 	}{
 		{"low_threshold_triggers", 80, true},

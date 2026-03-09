@@ -167,3 +167,22 @@ select
 from goroutines
 group by 1
 order by running_ns desc, name;
+
+create table gc_ranges (
+    name text,
+    scope_kind text,
+    scope_id bigint,
+    start_time_ns bigint,
+    end_time_ns bigint,
+    duration_ns bigint,
+    stack_id ubigint,
+    g bigint,
+    p bigint
+);
+
+create view gc_cycles as
+select
+    row_number() over (order by start_time_ns) as cycle,
+    start_time_ns, end_time_ns, duration_ns
+from gc_ranges
+where name = 'GC concurrent mark phase';
