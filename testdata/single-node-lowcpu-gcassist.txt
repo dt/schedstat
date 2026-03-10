@@ -16,11 +16,11 @@ GC cycles: 2, total: 25.78ms, avg: 12.89ms, min: 11.62ms, max: 14.16ms
     start trace: 1 pauses, total 4.5µs, max 4.5µs
   Mark assist: 72 events across 30 goroutines, total: 33.43ms, max single: 3.48ms
     Top affected goroutines:
-      G1068065  sql/pgwire.(*Server).serveImpl.func4     4 assists, total 4.72ms, max 3.25ms @ t=73ms
-      G1067930  sql/pgwire.(*Server).serveImpl.func4     3 assists, total 4.38ms, max 3.48ms @ t=72ms
-      G1068084  sql/pgwire.(*Server).serveImpl.func4     5 assists, total 3.78ms, max 3.24ms @ t=73ms
-      G1058917  sql/pgwire.(*Server).serveImpl.func4     6 assists, total 3.50ms, max 1.64ms @ t=71ms
-      G1068213  sql/pgwire.(*Server).serveImpl.func4     6 assists, total 3.50ms, max 1.68ms @ t=75ms
+      g1068065  sql/pgwire.(*Server).serveImpl.func4     4 assists, total 4.72ms, max 3.25ms @ t=73ms
+      g1067930  sql/pgwire.(*Server).serveImpl.func4     3 assists, total 4.38ms, max 3.48ms @ t=72ms
+      g1068084  sql/pgwire.(*Server).serveImpl.func4     5 assists, total 3.78ms, max 3.24ms @ t=73ms
+      g1058917  sql/pgwire.(*Server).serveImpl.func4     6 assists, total 3.50ms, max 1.64ms @ t=71ms
+      g1068213  sql/pgwire.(*Server).serveImpl.func4     6 assists, total 3.50ms, max 1.68ms @ t=75ms
   Scheduling latency during GC vs normal:
                    count      p50        p99        max       
     During GC:     869        4.5µs      456.6µs    1.06ms    
