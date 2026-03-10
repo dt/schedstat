@@ -712,7 +712,7 @@ func printMarkAssist(db *sql.DB, w io.Writer) error {
 		if err := rows.Scan(&scopeID, &gname, &assists, &totalAssistNs, &maxAssistNs, &worstAtMs); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "      G%-8d %-40s %d assists, total %s, max %s @ t=%.0fms\n",
+		fmt.Fprintf(w, "      g%-8d %-40s %d assists, total %s, max %s @ t=%.0fms\n",
 			scopeID, shortenFunc(gname), assists, fmtDuration(totalAssistNs), fmtDuration(maxAssistNs), worstAtMs)
 	}
 	return rows.Err()
