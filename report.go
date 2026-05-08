@@ -122,7 +122,7 @@ type TimeseriesWindow struct {
 	StartMs float64 `json:"start_ms"`
 	EndMs   float64 `json:"end_ms"`
 	Events  int     `json:"events"`
-	P99Ns   float64 `json:"p99_ns"`
+	P99Ns   int64   `json:"p99_ns"`
 }
 
 func (t *TimeseriesReport) String() string {
@@ -132,11 +132,11 @@ func (t *TimeseriesReport) String() string {
 	fmt.Fprintf(&b, "%-8s %-10s %-10s %-8s %-12s\n", "------", "---------", "-------", "------", "---")
 	for _, w := range t.Windows {
 		marker := ""
-		if int64(w.P99Ns) > t.ThresholdNs {
+		if w.P99Ns > t.ThresholdNs {
 			marker = " ←"
 		}
 		fmt.Fprintf(&b, "%-8d %-10.0f %-10.0f %-8d %-12s%s\n",
-			w.Window, w.StartMs, w.EndMs, w.Events, fmtDuration(w.P99Ns), marker)
+			w.Window, w.StartMs, w.EndMs, w.Events, fmtDuration(float64(w.P99Ns)), marker)
 	}
 	return b.String()
 }
@@ -164,8 +164,8 @@ type SpikeSummary struct {
 	WindowNum    int     `json:"window_num"`
 	StartMs      float64 `json:"start_ms"`
 	EventCount   int     `json:"event_count,omitempty"`
-	P99Ns        float64 `json:"p99_ns,omitempty"`
-	MaxLatencyNs float64 `json:"max_latency_ns,omitempty"`
+	P99Ns        int64   `json:"p99_ns,omitempty"`
+	MaxLatencyNs int64   `json:"max_latency_ns,omitempty"`
 	MaxRunnable  int     `json:"max_runnable,omitempty"`
 }
 
@@ -188,7 +188,7 @@ func (s *SpikesReport) String() string {
 	for _, sp := range s.Spikes {
 		if s.Kind == "latency" {
 			fmt.Fprintf(&b, "  [%d] t=%.0fms  p99=%s  max=%s  %d events\n",
-				sp.Index, sp.StartMs, fmtDuration(sp.P99Ns), fmtDuration(sp.MaxLatencyNs), sp.EventCount)
+				sp.Index, sp.StartMs, fmtDuration(float64(sp.P99Ns)), fmtDuration(float64(sp.MaxLatencyNs)), sp.EventCount)
 		} else {
 			fmt.Fprintf(&b, "  [%d] t=%.0fms  peak %d runnable\n",
 				sp.Index, sp.StartMs, sp.MaxRunnable)
@@ -219,17 +219,17 @@ type SpikeDetail struct {
 	Index       int     `json:"index"`
 	Type        string  `json:"type"`
 	StartMs     float64 `json:"start_ms"`
-	P99Ns       float64 `json:"p99_ns,omitempty"`
+	P99Ns       int64   `json:"p99_ns,omitempty"`
 	MaxRunnable int     `json:"max_runnable,omitempty"`
 
 	// Latency-spike findings (nil ⇒ "no rows" / not applicable).
-	WorstG          *int64       `json:"worst_g,omitempty"`
-	WorstDurationNs *int64       `json:"worst_duration_ns,omitempty"`
-	WorstP          *int64       `json:"worst_p,omitempty"`
-	BurstCount      *int         `json:"burst_count,omitempty"`
-	LongestRun      *LongestRun  `json:"longest_run,omitempty"`
-	QueueRunners    *int         `json:"queue_runners,omitempty"`
-	QueueRuns       *int         `json:"queue_runs,omitempty"`
+	WorstG          *int64      `json:"worst_g,omitempty"`
+	WorstDurationNs *int64      `json:"worst_duration_ns,omitempty"`
+	WorstP          *int64      `json:"worst_p,omitempty"`
+	BurstCount      *int        `json:"burst_count,omitempty"`
+	LongestRun      *LongestRun `json:"longest_run,omitempty"`
+	QueueRunners    *int        `json:"queue_runners,omitempty"`
+	QueueRuns       *int        `json:"queue_runs,omitempty"`
 
 	// Burst breakdown (latency uses only when burst threshold met; runnable
 	// always populates).
@@ -245,7 +245,7 @@ type LongestRun struct {
 func (d *SpikeDetail) String() string {
 	var b strings.Builder
 	if d.Type == "latency" {
-		fmt.Fprintf(&b, "[%d] t=%.0fms [latency] p99=%s\n", d.Index, d.StartMs, fmtDuration(d.P99Ns))
+		fmt.Fprintf(&b, "[%d] t=%.0fms [latency] p99=%s\n", d.Index, d.StartMs, fmtDuration(float64(d.P99Ns)))
 		if d.WorstG == nil {
 			return b.String()
 		}
@@ -394,11 +394,11 @@ type ByCreatorReport struct {
 }
 
 type CreatorRow struct {
-	Creator    string `json:"creator"`
-	Count      int    `json:"count"`
-	TotalNs    int64  `json:"total_ns"`
-	MaxNs      int64  `json:"max_ns"`
-	P99Ns      int64  `json:"p99_ns"`
+	Creator string `json:"creator"`
+	Count   int    `json:"count"`
+	TotalNs int64  `json:"total_ns"`
+	MaxNs   int64  `json:"max_ns"`
+	P99Ns   int64  `json:"p99_ns"`
 }
 
 func (r *ByCreatorReport) String() string {
@@ -415,12 +415,12 @@ func (r *ByCreatorReport) String() string {
 // --- GC analysis ---
 
 type GCReport struct {
-	CycleSummary      *GCCycleSummary       `json:"cycle_summary,omitempty"`
-	STW               *GCSTWSummary         `json:"stw,omitempty"`
-	MarkAssist        *GCMarkAssist         `json:"mark_assist,omitempty"`
-	LatencyComparison *GCLatencyComparison  `json:"latency_comparison,omitempty"`
-	PerCycle          *GCPerCycleBreakdown  `json:"per_cycle,omitempty"`
-	Sweep             *GCSweepSummary       `json:"sweep,omitempty"`
+	CycleSummary      *GCCycleSummary      `json:"cycle_summary,omitempty"`
+	STW               *GCSTWSummary        `json:"stw,omitempty"`
+	MarkAssist        *GCMarkAssist        `json:"mark_assist,omitempty"`
+	LatencyComparison *GCLatencyComparison `json:"latency_comparison,omitempty"`
+	PerCycle          *GCPerCycleBreakdown `json:"per_cycle,omitempty"`
+	Sweep             *GCSweepSummary      `json:"sweep,omitempty"`
 }
 
 func (g *GCReport) String() string {
@@ -492,20 +492,20 @@ func (g *GCSTWSummary) String() string {
 }
 
 type GCMarkAssist struct {
-	TotalEvents     int                 `json:"total_events"`
-	TotalGoroutines int                 `json:"total_goroutines"`
-	TotalNs         *int64              `json:"total_ns,omitempty"`
-	MaxSingleNs     *int64              `json:"max_single_ns,omitempty"`
-	TopGoroutines   []MarkAssistGEntry  `json:"top_goroutines,omitempty"`
+	TotalEvents     int                `json:"total_events"`
+	TotalGoroutines int                `json:"total_goroutines"`
+	TotalNs         *int64             `json:"total_ns,omitempty"`
+	MaxSingleNs     *int64             `json:"max_single_ns,omitempty"`
+	TopGoroutines   []MarkAssistGEntry `json:"top_goroutines,omitempty"`
 }
 
 type MarkAssistGEntry struct {
-	G            int64   `json:"g"`
-	Name         string  `json:"name"`
-	Assists      int     `json:"assists"`
-	TotalNs      int64   `json:"total_ns"`
-	MaxNs        int64   `json:"max_ns"`
-	WorstAtMs    float64 `json:"worst_at_ms"`
+	G         int64   `json:"g"`
+	Name      string  `json:"name"`
+	Assists   int     `json:"assists"`
+	TotalNs   int64   `json:"total_ns"`
+	MaxNs     int64   `json:"max_ns"`
+	WorstAtMs float64 `json:"worst_at_ms"`
 }
 
 func (g *GCMarkAssist) String() string {
@@ -528,10 +528,10 @@ type GCLatencyComparison struct {
 	DuringGC LatencyBucket `json:"during_gc"`
 	NonGC    LatencyBucket `json:"non_gc"`
 	// RatioP50 etc: only present when nonGC.p50 > 0 and nonGC.p50 valid and duringGC.p50 valid.
-	HasRatio  bool    `json:"-"`
-	RatioP50  float64 `json:"ratio_p50,omitempty"`
-	RatioP99  float64 `json:"ratio_p99,omitempty"`
-	RatioMax  float64 `json:"ratio_max,omitempty"`
+	HasRatio bool    `json:"-"`
+	RatioP50 float64 `json:"ratio_p50,omitempty"`
+	RatioP99 float64 `json:"ratio_p99,omitempty"`
+	RatioMax float64 `json:"ratio_max,omitempty"`
 }
 
 type LatencyBucket struct {
@@ -640,8 +640,8 @@ func (br *BurstReport) String() string {
 // --- Worst delays ---
 
 type WorstDelaysReport struct {
-	N    int              `json:"n"`
-	Rows []WorstDelayRow  `json:"rows"`
+	N    int             `json:"n"`
+	Rows []WorstDelayRow `json:"rows"`
 }
 
 type WorstDelayRow struct {

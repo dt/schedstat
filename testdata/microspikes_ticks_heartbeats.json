@@ -21,7 +21,7 @@
         "window_num": 22,
         "start_ms": 2200,
         "event_count": 5962,
-        "p99_ns": 1827822.7200000002,
+        "p99_ns": 1827822,
         "max_latency_ns": 2408576
       },
       {
@@ -29,7 +29,7 @@
         "window_num": 12,
         "start_ms": 1200,
         "event_count": 5075,
-        "p99_ns": 1760564.48,
+        "p99_ns": 1760564,
         "max_latency_ns": 2431168
       },
       {
@@ -37,7 +37,7 @@
         "window_num": 17,
         "start_ms": 1700,
         "event_count": 4183,
-        "p99_ns": 1742796.8000000175,
+        "p99_ns": 1742796,
         "max_latency_ns": 2230976
       },
       {
@@ -45,7 +45,7 @@
         "window_num": 7,
         "start_ms": 700,
         "event_count": 5519,
-        "p99_ns": 1634042.8799999915,
+        "p99_ns": 1634042,
         "max_latency_ns": 2303424
       },
       {
@@ -102,7 +102,7 @@
         "index": 1,
         "type": "latency",
         "start_ms": 2200,
-        "p99_ns": 1827822.7200000002,
+        "p99_ns": 1827822,
         "worst_g": 1927,
         "worst_duration_ns": 2408576,
         "worst_p": 9,
@@ -364,7 +364,7 @@
         "index": 2,
         "type": "latency",
         "start_ms": 1200,
-        "p99_ns": 1760564.48,
+        "p99_ns": 1760564,
         "worst_g": 2074,
         "worst_duration_ns": 2431168,
         "worst_p": 15,
@@ -562,7 +562,7 @@
         "index": 3,
         "type": "latency",
         "start_ms": 1700,
-        "p99_ns": 1742796.8000000175,
+        "p99_ns": 1742796,
         "worst_g": 1925,
         "worst_duration_ns": 2230976,
         "worst_p": 6,
@@ -694,7 +694,7 @@
         "index": 4,
         "type": "latency",
         "start_ms": 700,
-        "p99_ns": 1634042.8799999915,
+        "p99_ns": 1634042,
         "worst_g": 2069,
         "worst_duration_ns": 2303424,
         "worst_p": 15,

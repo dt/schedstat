@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -479,9 +480,11 @@ func collectTimeseries(
 	}
 	for rows.Next() {
 		var w TimeseriesWindow
-		if err := rows.Scan(&w.Window, &w.StartMs, &w.EndMs, &w.Events, &w.P99Ns); err != nil {
+		var p99 float64
+		if err := rows.Scan(&w.Window, &w.StartMs, &w.EndMs, &w.Events, &p99); err != nil {
 			return nil, err
 		}
+		w.P99Ns = int64(p99)
 		t.Windows = append(t.Windows, w)
 	}
 	return t, rows.Err()
@@ -520,9 +523,12 @@ func queryLatencySpikes(
 	var total int
 	for rows.Next() {
 		s := SpikeSummary{Type: "latency"}
-		if err := rows.Scan(&s.WindowNum, &s.StartMs, &s.EventCount, &s.P99Ns, &s.MaxLatencyNs, &total); err != nil {
+		var p99, maxLat float64
+		if err := rows.Scan(&s.WindowNum, &s.StartMs, &s.EventCount, &p99, &maxLat, &total); err != nil {
 			return nil, 0, err
 		}
+		s.P99Ns = int64(p99)
+		s.MaxLatencyNs = int64(maxLat)
 		spikes = append(spikes, s)
 	}
 	return spikes, total, rows.Err()
@@ -877,14 +883,18 @@ func collectGCLatencyComparison(db *sql.DB) (*GCLatencyComparison, error) {
 		},
 	}
 
+	// Round ratios to 6 decimals so JSON output is bit-identical across
+	// platforms (linux/darwin float64 ULP differences would otherwise break
+	// golden tests).
+	round6 := func(x float64) float64 { return math.Round(x*1e6) / 1e6 }
 	if nP50.Valid && nP50.Float64 > 0 && dP50.Valid {
 		out.HasRatio = true
-		out.RatioP50 = dP50.Float64 / nP50.Float64
+		out.RatioP50 = round6(dP50.Float64 / nP50.Float64)
 		if nP99.Valid && nP99.Float64 > 0 && dP99.Valid {
-			out.RatioP99 = dP99.Float64 / nP99.Float64
+			out.RatioP99 = round6(dP99.Float64 / nP99.Float64)
 		}
 		if nMax.Valid && nMax.Float64 > 0 && dMax.Valid {
-			out.RatioMax = dMax.Float64 / nMax.Float64
+			out.RatioMax = round6(dMax.Float64 / nMax.Float64)
 		}
 	}
 	return out, nil

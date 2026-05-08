@@ -21,7 +21,7 @@
         "window_num": 99,
         "start_ms": 9900,
         "event_count": 14755,
-        "p99_ns": 15939957.759999983,
+        "p99_ns": 15939957,
         "max_latency_ns": 21755200
       },
       {
@@ -29,7 +29,7 @@
         "window_num": 77,
         "start_ms": 7700,
         "event_count": 16930,
-        "p99_ns": 4734288.64,
+        "p99_ns": 4734288,
         "max_latency_ns": 6175616
       },
       {
@@ -45,7 +45,7 @@
         "window_num": 100,
         "start_ms": 10000,
         "event_count": 207,
-        "p99_ns": 4644794.88,
+        "p99_ns": 4644794,
         "max_latency_ns": 4790656
       },
       {
@@ -53,7 +53,7 @@
         "window_num": 70,
         "start_ms": 7000,
         "event_count": 15733,
-        "p99_ns": 4640145.920000002,
+        "p99_ns": 4640145,
         "max_latency_ns": 6394240
       }
     ]
@@ -102,7 +102,7 @@
         "index": 1,
         "type": "latency",
         "start_ms": 9900,
-        "p99_ns": 15939957.759999983,
+        "p99_ns": 15939957,
         "worst_g": 2508080,
         "worst_duration_ns": 21755200,
         "worst_p": 5,
@@ -275,7 +275,7 @@
         "index": 2,
         "type": "latency",
         "start_ms": 7700,
-        "p99_ns": 4734288.64,
+        "p99_ns": 4734288,
         "worst_g": 2485448,
         "worst_duration_ns": 6175616,
         "worst_p": 10,
@@ -601,7 +601,7 @@
         "index": 4,
         "type": "latency",
         "start_ms": 10000,
-        "p99_ns": 4644794.88,
+        "p99_ns": 4644794,
         "worst_g": 277751,
         "worst_duration_ns": 318272,
         "worst_p": 7,
@@ -791,7 +791,7 @@
         "index": 5,
         "type": "latency",
         "start_ms": 7000,
-        "p99_ns": 4640145.920000002,
+        "p99_ns": 4640145,
         "worst_g": 2478120,
         "worst_duration_ns": 6394240,
         "worst_p": 0,
@@ -1954,9 +1954,9 @@
         "p99_ns": 3159040,
         "max_ns": 7583872
       },
-      "ratio_p50": 1.928780476006192,
-      "ratio_p99": 5.1529945299837925,
-      "ratio_max": 2.868613816266941
+      "ratio_p50": 1.92878,
+      "ratio_p99": 5.152995,
+      "ratio_max": 2.868614
     },
     "sweep": {
       "count": 3809,
