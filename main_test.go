@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -29,6 +30,8 @@ func testOpts() struct {
 	keepDB             bool
 	sql                bool
 	verbose            bool
+	json               bool
+	concurrency        int
 } {
 	return struct {
 		window             time.Duration
@@ -44,6 +47,8 @@ func testOpts() struct {
 		keepDB             bool
 		sql                bool
 		verbose            bool
+		json               bool
+		concurrency        int
 	}{
 		window:             100 * time.Millisecond,
 		spikeThreshold:     1 * time.Millisecond,
@@ -79,30 +84,49 @@ func TestGoldenOutput(t *testing.T) {
 	for _, traceFile := range traces {
 		name := strings.TrimSuffix(filepath.Base(traceFile), ".bin")
 		goldenFile := filepath.Join("testdata", name+".txt")
+		jsonGoldenFile := filepath.Join("testdata", name+".json")
 
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := runAnalysis(traceFile, &buf); err != nil {
-				t.Fatalf("runAnalysis(%s): %v", traceFile, err)
+			report, err := analyzeFile(traceFile, &buf)
+			if err != nil {
+				t.Fatalf("analyzeFile(%s): %v", traceFile, err)
 			}
 			got := buf.String()
 
+			gotJSON, err := json.MarshalIndent(report, "", "  ")
+			if err != nil {
+				t.Fatalf("marshal report: %v", err)
+			}
+			gotJSON = append(gotJSON, '\n')
+
 			if *rewrite {
 				if err := os.WriteFile(goldenFile, []byte(got), 0644); err != nil {
-					t.Fatalf("writing golden file: %v", err)
+					t.Fatalf("writing text golden: %v", err)
 				}
-				t.Logf("rewrote %s", goldenFile)
+				if err := os.WriteFile(jsonGoldenFile, gotJSON, 0644); err != nil {
+					t.Fatalf("writing JSON golden: %v", err)
+				}
+				t.Logf("rewrote %s and %s", goldenFile, jsonGoldenFile)
 				return
 			}
 
 			want, err := os.ReadFile(goldenFile)
 			if err != nil {
-				t.Fatalf("reading golden file (run with -rewrite to generate): %v", err)
+				t.Fatalf("reading text golden (run with -rewrite to generate): %v", err)
+			}
+			if got != string(want) {
+				t.Errorf("text output mismatch for %s (run with -rewrite to update)\n\n%s",
+					traceFile, lineDiff(string(want), got))
 			}
 
-			if got != string(want) {
-				t.Errorf("output mismatch for %s (run with -rewrite to update)\n\n%s",
-					traceFile, lineDiff(string(want), got))
+			wantJSON, err := os.ReadFile(jsonGoldenFile)
+			if err != nil {
+				t.Fatalf("reading JSON golden (run with -rewrite to generate): %v", err)
+			}
+			if string(gotJSON) != string(wantJSON) {
+				t.Errorf("JSON output mismatch for %s (run with -rewrite to update)\n\n%s",
+					traceFile, lineDiff(string(wantJSON), string(gotJSON)))
 			}
 		})
 	}

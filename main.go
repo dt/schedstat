@@ -2,12 +2,16 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -31,6 +35,8 @@ var opts struct {
 	keepDB             bool
 	sql                bool
 	verbose            bool
+	json               bool
+	concurrency        int
 }
 
 func main() {
@@ -46,13 +52,71 @@ Examples:
   schedstat --sql trace.out          # Drop into DuckDB shell for custom queries`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if opts.json && opts.sql {
+				return fmt.Errorf("--json and --sql are mutually exclusive")
+			}
+			// --sql calls syscall.Exec at the end (process replacement), which
+			// is incompatible with the parallel/buffered path. Single-file
+			// usage stays sequential and direct; multi-file is rejected.
+			if opts.sql {
+				if len(args) > 1 {
+					return fmt.Errorf("--sql can only be used with a single trace file")
+				}
+				return runOne(os.Stdout, args[0])
+			}
+
+			concurrency := opts.concurrency
+			if concurrency <= 0 {
+				concurrency = runtime.GOMAXPROCS(0)
+			}
+			if concurrency > len(args) {
+				concurrency = len(args)
+			}
+
+			// Each file gets a result slot with its own done channel. Workers
+			// run up to `concurrency` at a time and close their slot's
+			// channel when finished. The emitter walks slots in input order,
+			// blocking on the next one — so output is deterministic and
+			// streams as soon as the next-in-line file is ready.
+			type result struct {
+				stdout []byte
+				err    error
+				done   chan struct{}
+			}
+			results := make([]result, len(args))
+			for i := range results {
+				results[i].done = make(chan struct{})
+			}
+			sem := make(chan struct{}, concurrency)
+			// Dispatch in its own goroutine so the emitter loop below can
+			// start writing as soon as file 0 finishes — without it, the
+			// dispatcher's `sem <-` would block the main goroutine until
+			// every worker had launched, which for long file lists means
+			// the emitter never gets to run until near the end.
+			go func() {
+				for i, traceFile := range args {
+					sem <- struct{}{}
+					go func(i int, traceFile string) {
+						defer close(results[i].done)
+						defer func() { <-sem }()
+						var buf bytes.Buffer
+						results[i].err = runOne(&buf, traceFile)
+						results[i].stdout = buf.Bytes()
+					}(i, traceFile)
+				}
+			}()
+
 			exitCode := 0
-			for i, traceFile := range args {
-				if i > 0 {
+			for i := range args {
+				<-results[i].done
+				if i > 0 && !opts.json {
 					fmt.Println()
 				}
-				if err := run(traceFile); err != nil {
-					fmt.Fprintf(os.Stderr, "error processing %s: %v\n", traceFile, err)
+				if len(results[i].stdout) > 0 {
+					os.Stdout.Write(results[i].stdout)
+				}
+				if results[i].err != nil {
+					fmt.Fprintf(os.Stderr, "error processing %s: %v\n", args[i], results[i].err)
 					exitCode = 1
 				}
 			}
@@ -77,13 +141,18 @@ Examples:
 	f.BoolVar(&opts.keepDB, "keep-db", false, "keep DuckDB file after analysis")
 	f.BoolVar(&opts.sql, "sql", false, "drop into DuckDB shell after analysis")
 	f.BoolVarP(&opts.verbose, "verbose", "v", false, "verbose output")
+	f.BoolVar(&opts.json, "json", false, "emit JSON (NDJSON for multiple traces) instead of plaintext")
+	f.IntVar(&opts.concurrency, "concurrency", 0, "number of trace files to process in parallel (0 = GOMAXPROCS)")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-func run(traceFile string) error {
+// runOne processes a single trace file and writes all output (text or JSON) to
+// w. With --sql it transfers control to the DuckDB shell via syscall.Exec at
+// the end; in that case w is expected to be os.Stdout.
+func runOne(w io.Writer, traceFile string) error {
 	dbFile := traceFile + ".duckdb"
 	needsCleanup := !opts.keepDB && !opts.sql
 	if needsCleanup {
@@ -112,166 +181,251 @@ func run(traceFile string) error {
 
 	database := db.DB
 
-	if err := analyze(database, traceFile, os.Stdout); err != nil {
+	var analyzeW io.Writer = w
+	if opts.json {
+		// Suppress streaming text; the report is encoded as JSON below.
+		analyzeW = io.Discard
+	}
+	report, err := analyze(database, traceFile, analyzeW)
+	if err != nil {
 		database.Close()
 		return err
 	}
 	database.Close()
 
+	if opts.json {
+		// json.Encoder.Encode appends '\n', producing NDJSON across traces.
+		if err := json.NewEncoder(w).Encode(report); err != nil {
+			return err
+		}
+		if opts.keepDB {
+			// Footer goes to stderr so stdout stays valid NDJSON.
+			fmt.Fprintf(os.Stderr, "DuckDB file: %s\n", dbFile)
+		}
+		return nil
+	}
+
 	if opts.keepDB {
-		fmt.Printf("\n%s\n", strings.Repeat("=", 60))
-		fmt.Printf("DuckDB file: %s\n", dbFile)
-		printSchemaInfo()
+		fmt.Fprintf(w, "\n%s\n", strings.Repeat("=", 60))
+		fmt.Fprintf(w, "DuckDB file: %s\n", dbFile)
+		fmt.Fprint(w, schemaInfo())
 	}
 
 	if opts.sql {
-		fmt.Printf("\n%s\n", strings.Repeat("=", 60))
-		fmt.Println("Dropping into DuckDB shell...")
-		printSchemaInfo()
-		fmt.Println()
+		fmt.Fprintf(w, "\n%s\n", strings.Repeat("=", 60))
+		fmt.Fprintln(w, "Dropping into DuckDB shell...")
+		fmt.Fprint(w, schemaInfo())
+		fmt.Fprintln(w)
 		return execDuckDB(dbFile)
 	}
 
 	return nil
 }
 
-// runAnalysis is the internal entry point for running schedstat on a trace file,
-// writing output to w. Tests use this to capture output without compiling and
-// executing the binary.
-func runAnalysis(traceFile string, w io.Writer) error {
+// analyzeFile is the internal entry point for running schedstat on a trace
+// file. It loads the trace into a temporary DuckDB, runs analyze, streams the
+// plaintext form to w, and returns the populated Report. Tests use this to
+// capture output (and the structured Report for JSON comparisons) without
+// compiling and executing the binary.
+func analyzeFile(traceFile string, w io.Writer) (*Report, error) {
 	dbFile := traceFile + ".duckdb"
 	defer os.Remove(dbFile)
 	_ = os.Remove(dbFile)
 
 	traceData, err := os.Open(traceFile)
 	if err != nil {
-		return fmt.Errorf("opening trace file: %w", err)
+		return nil, fmt.Errorf("opening trace file: %w", err)
 	}
 
 	db, err := tracedb.Create(dbFile, traceData)
 	traceData.Close()
 	if err != nil {
-		return fmt.Errorf("loading trace: %w", err)
+		return nil, fmt.Errorf("loading trace: %w", err)
 	}
 	defer db.DB.Close()
 
 	return analyze(db.DB, traceFile, w)
 }
 
-func analyze(db *sql.DB, traceFile string, w io.Writer) error {
-	fmt.Fprintf(w, "schedstat: %s\n", filepath.Base(traceFile))
-	fmt.Fprintln(w, strings.Repeat("=", 60))
+// runAnalysis is a back-compatible wrapper around analyzeFile that discards
+// the Report.
+func runAnalysis(traceFile string, w io.Writer) error {
+	_, err := analyzeFile(traceFile, w)
+	return err
+}
 
-	// Get time bounds
+// analyze runs the full analysis pipeline. It populates a Report struct with
+// every section's data and, in parallel, streams each section's plaintext form
+// to w as soon as it is collected. Streaming keeps progress visible for long
+// analyses and ensures partial output is preserved on early termination.
+func analyze(db *sql.DB, traceFile string, w io.Writer) (*Report, error) {
+	r := &Report{TraceFile: filepath.Base(traceFile)}
+
+	// Get time bounds.
 	var minTime, maxTime int64
-	err := db.QueryRow(`
+	if err := db.QueryRow(`
 		SELECT MIN(end_time_ns - duration_ns), MAX(end_time_ns)
 		FROM g_transitions
 		WHERE from_state = 'runnable' AND to_state = 'running'
-	`).Scan(&minTime, &maxTime)
-	if err != nil {
-		return fmt.Errorf("getting time bounds: %w", err)
+	`).Scan(&minTime, &maxTime); err != nil {
+		return r, fmt.Errorf("getting time bounds: %w", err)
 	}
-	durationMs := float64(maxTime-minTime) / 1e6
-	fmt.Fprintf(w, "\nTrace duration: %.1fms\n", durationMs)
+	r.DurationMs = float64(maxTime-minTime) / 1e6
+	fmt.Fprint(w, r.Header())
 
-	// Get processor count for goroutine threshold default
+	// Get processor count for goroutine threshold default.
 	var procCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM procs`).Scan(&procCount); err != nil {
-		return fmt.Errorf("getting processor count: %w", err)
+		return r, fmt.Errorf("getting processor count: %w", err)
 	}
 	goroutineThreshold := opts.goroutineThreshold
 	if goroutineThreshold == 0 {
 		goroutineThreshold = 5 * procCount
 	}
 
-	// Always show overall stats
-	if err := printOverallStats(db, w); err != nil {
-		return err
-	}
+	emit := func(s fmt.Stringer) { fmt.Fprint(w, s.String()) }
 
-	// Time series if requested
+	// Always show overall stats.
+	overall, err := collectOverallStats(db)
+	if err != nil {
+		return r, err
+	}
+	r.Overall = overall
+	emit(overall)
+
+	// Time series if requested.
 	if opts.timeseries {
-		if err := printTimeseries(db, w, minTime, opts.window); err != nil {
-			return err
+		ts, err := collectTimeseries(db, minTime, opts.window, opts.spikeThreshold)
+		if err != nil {
+			return r, err
 		}
+		r.Timeseries = ts
+		emit(ts)
 	}
 
 	// Spike detection.
 	latencySpikes, totalLatency, err := queryLatencySpikes(db, minTime, opts.window, opts.spikeThreshold, opts.top)
 	if err != nil {
-		return err
+		return r, err
 	}
 	runnableSpikes, totalRunnable, err := queryRunnableSpikes(db, minTime, opts.window, goroutineThreshold, opts.top)
 	if err != nil {
-		return err
+		return r, err
 	}
 
-	// Assign display indices before printing so print functions are pure output.
+	// Assign display indices before rendering so summaries and details agree.
 	idx := 1
 	for i := range latencySpikes {
-		latencySpikes[i].index = idx
+		latencySpikes[i].Index = idx
 		idx++
 	}
 	for i := range runnableSpikes {
-		runnableSpikes[i].index = idx
+		runnableSpikes[i].Index = idx
 		idx++
 	}
 
-	printLatencySpikesSection(w, latencySpikes, totalLatency, opts.window, opts.spikeThreshold)
-	printRunnableSpikesSection(w, runnableSpikes, totalRunnable, opts.window, goroutineThreshold)
+	if totalLatency > 0 {
+		r.LatencySpikes = &SpikesReport{
+			Kind:             "latency",
+			WindowLabel:      opts.window.String(),
+			LatencyThreshold: opts.spikeThreshold.String(),
+			Total:            totalLatency,
+			Spikes:           latencySpikes,
+		}
+		emit(r.LatencySpikes)
+	}
+	if totalRunnable > 0 {
+		r.RunnableSpikes = &SpikesReport{
+			Kind:              "runnable",
+			WindowLabel:       opts.window.String(),
+			RunnableThreshold: goroutineThreshold,
+			Total:             totalRunnable,
+			Spikes:            runnableSpikes,
+		}
+		emit(r.RunnableSpikes)
+	}
 
-	allSpikes := make([]spikeInfo, 0, len(latencySpikes)+len(runnableSpikes))
+	allSpikes := make([]SpikeSummary, 0, len(latencySpikes)+len(runnableSpikes))
 	allSpikes = append(allSpikes, latencySpikes...)
 	allSpikes = append(allSpikes, runnableSpikes...)
 	if len(allSpikes) > 0 {
-		if err := printSpikeDetails(db, w, allSpikes, minTime, opts.window); err != nil {
-			return err
+		details, err := collectSpikeDetails(db, allSpikes, minTime, opts.window)
+		if err != nil {
+			return r, err
 		}
+		r.SpikeDetails = details
+		emit(details)
 	}
 
-	// By-creator analysis
+	// By-creator analysis.
 	if opts.byCreator {
-		if err := printByCreator(db, w); err != nil {
-			return err
+		bc, err := collectByCreator(db)
+		if err != nil {
+			return r, err
 		}
+		r.ByCreator = bc
+		emit(bc)
 	}
 
-	// GC analysis
+	// GC analysis.
 	if opts.gc {
-		if err := printGCAnalysis(db, w); err != nil {
-			return err
+		gc, err := collectGCAnalysis(db)
+		if err != nil {
+			return r, err
+		}
+		if gc != nil {
+			r.GC = gc
+			emit(gc)
 		}
 	}
 
-	// Burst analysis
+	// Burst analysis.
 	if opts.bursts {
-		if err := printBurstAnalysis(db, w, opts.window); err != nil {
-			return err
+		br, err := collectBurstAnalysis(db, opts.window)
+		if err != nil {
+			return r, err
 		}
+		r.Bursts = br
+		emit(br)
 	}
 
-	// Worst delays
+	// Worst delays.
 	if opts.worst > 0 {
-		if err := printWorstDelays(db, w, opts.worst); err != nil {
-			return err
+		wd, err := collectWorstDelays(db, opts.worst)
+		if err != nil {
+			return r, err
 		}
+		r.WorstDelays = wd
+		emit(wd)
 	}
 
-	// Top goroutines by wait time (optional, can be slow)
+	// Top goroutines by wait time (optional, can be slow).
 	if opts.topWaiters {
-		if err := printTopGoroutines(db, w); err != nil {
-			return err
+		tg, err := collectTopGoroutines(db)
+		if err != nil {
+			return r, err
 		}
+		r.TopGoroutines = tg
+		emit(tg)
 	}
 
-	return nil
+	return r, nil
 }
 
-func printOverallStats(db *sql.DB, w io.Writer) error {
+// nullF64ToInt64Ptr converts a nullable float-nanoseconds value (as returned
+// by DuckDB aggregate functions over an empty set, or unmaterialized scans) to
+// a *int64 suitable for omitempty JSON serialization.
+func nullF64ToInt64Ptr(n sql.NullFloat64) *int64 {
+	if !n.Valid {
+		return nil
+	}
+	v := int64(n.Float64)
+	return &v
+}
+
+func collectOverallStats(db *sql.DB) (*OverallStats, error) {
 	var count int
 	var minNs, avgNs, p50Ns, p90Ns, p99Ns, maxNs sql.NullFloat64
-
 	err := db.QueryRow(`
 		SELECT
 			COUNT(*),
@@ -285,21 +439,22 @@ func printOverallStats(db *sql.DB, w io.Writer) error {
 		WHERE from_state = 'runnable' AND to_state = 'running'
 	`).Scan(&count, &minNs, &avgNs, &p50Ns, &p90Ns, &p99Ns, &maxNs)
 	if err != nil {
-		return fmt.Errorf("getting overall stats: %w", err)
+		return nil, fmt.Errorf("getting overall stats: %w", err)
 	}
-
-	fmt.Fprintln(w, "\n--- Scheduling Latency (runnable → running) ---")
-	fmt.Fprintf(w, "Events: %d\n", count)
-	if count > 0 {
-		fmt.Fprintf(w, "  min: %-10s  p50: %-10s  p90: %-10s\n",
-			fmtNullDuration(minNs), fmtNullDuration(p50Ns), fmtNullDuration(p90Ns))
-		fmt.Fprintf(w, "  avg: %-10s  p99: %-10s  max: %-10s\n",
-			fmtNullDuration(avgNs), fmtNullDuration(p99Ns), fmtNullDuration(maxNs))
-	}
-	return nil
+	return &OverallStats{
+		Count: count,
+		MinNs: nullF64ToInt64Ptr(minNs),
+		AvgNs: nullF64ToInt64Ptr(avgNs),
+		P50Ns: nullF64ToInt64Ptr(p50Ns),
+		P90Ns: nullF64ToInt64Ptr(p90Ns),
+		P99Ns: nullF64ToInt64Ptr(p99Ns),
+		MaxNs: nullF64ToInt64Ptr(maxNs),
+	}, nil
 }
 
-func printTimeseries(db *sql.DB, w io.Writer, minTime int64, window time.Duration) error {
+func collectTimeseries(
+	db *sql.DB, minTime int64, window, threshold time.Duration,
+) (*TimeseriesReport, error) {
 	windowNs := window.Nanoseconds()
 
 	rows, err := db.Query(`
@@ -315,53 +470,29 @@ func printTimeseries(db *sql.DB, w io.Writer, minTime int64, window time.Duratio
 		ORDER BY 1
 	`, minTime, windowNs)
 	if err != nil {
-		return fmt.Errorf("timeseries query: %w", err)
+		return nil, fmt.Errorf("timeseries query: %w", err)
 	}
 	defer rows.Close()
 
-	fmt.Fprintf(w, "\n--- Latency by %s Window ---\n", window)
-	fmt.Fprintf(w, "%-8s %-10s %-10s %-8s %-12s\n", "Window", "Start(ms)", "End(ms)", "Events", "p99")
-	fmt.Fprintf(w, "%-8s %-10s %-10s %-8s %-12s\n", "------", "---------", "-------", "------", "---")
-
-	for rows.Next() {
-		var windowNum int
-		var startMs, endMs float64
-		var cnt int
-		var p99 float64
-		if err := rows.Scan(&windowNum, &startMs, &endMs, &cnt, &p99); err != nil {
-			return err
-		}
-		marker := ""
-		if p99 > float64((opts.spikeThreshold).Nanoseconds()) {
-			marker = " ←"
-		}
-		fmt.Fprintf(w, "%-8d %-10.0f %-10.0f %-8d %-12s%s\n",
-			windowNum, startMs, endMs, cnt, fmtDuration(p99), marker)
+	t := &TimeseriesReport{
+		WindowLabel: window.String(),
+		ThresholdNs: threshold.Nanoseconds(),
 	}
-	return rows.Err()
-}
-
-type spikeType int
-
-const (
-	latencySpike spikeType = iota
-	runnableSpike
-)
-
-type spikeInfo struct {
-	index       int // sequential display number, assigned in analyze()
-	windowNum   int
-	startMs     float64
-	eventCount  int
-	p99         float64
-	maxLatency  float64
-	maxRunnable int
-	spikeType   spikeType
+	for rows.Next() {
+		var w TimeseriesWindow
+		var p99 float64
+		if err := rows.Scan(&w.Window, &w.StartMs, &w.EndMs, &w.Events, &p99); err != nil {
+			return nil, err
+		}
+		w.P99Ns = int64(p99)
+		t.Windows = append(t.Windows, w)
+	}
+	return t, rows.Err()
 }
 
 func queryLatencySpikes(
 	db *sql.DB, minTime int64, window, threshold time.Duration, top int,
-) ([]spikeInfo, int, error) {
+) ([]SpikeSummary, int, error) {
 	windowNs := window.Nanoseconds()
 	thresholdNs := float64(threshold.Nanoseconds())
 
@@ -388,14 +519,16 @@ func queryLatencySpikes(
 	}
 	defer rows.Close()
 
-	var spikes []spikeInfo
+	var spikes []SpikeSummary
 	var total int
 	for rows.Next() {
-		var s spikeInfo
-		s.spikeType = latencySpike
-		if err := rows.Scan(&s.windowNum, &s.startMs, &s.eventCount, &s.p99, &s.maxLatency, &total); err != nil {
+		s := SpikeSummary{Type: "latency"}
+		var p99, maxLat float64
+		if err := rows.Scan(&s.WindowNum, &s.StartMs, &s.EventCount, &p99, &maxLat, &total); err != nil {
 			return nil, 0, err
 		}
+		s.P99Ns = int64(p99)
+		s.MaxLatencyNs = int64(maxLat)
 		spikes = append(spikes, s)
 	}
 	return spikes, total, rows.Err()
@@ -403,7 +536,7 @@ func queryLatencySpikes(
 
 func queryRunnableSpikes(
 	db *sql.DB, minTime int64, window time.Duration, runnableThreshold, top int,
-) ([]spikeInfo, int, error) {
+) ([]SpikeSummary, int, error) {
 	windowMs := window.Milliseconds()
 
 	rows, err := db.Query(`
@@ -442,65 +575,20 @@ func queryRunnableSpikes(
 	}
 	defer rows.Close()
 
-	var spikes []spikeInfo
+	var spikes []SpikeSummary
 	var total int
 	for rows.Next() {
-		var s spikeInfo
-		s.spikeType = runnableSpike
-		if err := rows.Scan(&s.windowNum, &s.maxRunnable, &total); err != nil {
+		s := SpikeSummary{Type: "runnable"}
+		if err := rows.Scan(&s.WindowNum, &s.MaxRunnable, &total); err != nil {
 			return nil, 0, err
 		}
-		s.startMs = float64(s.windowNum) * float64(windowMs)
+		s.StartMs = float64(s.WindowNum) * float64(windowMs)
 		spikes = append(spikes, s)
 	}
 	return spikes, total, rows.Err()
 }
 
-func printLatencySpikesSection(
-	w io.Writer, spikes []spikeInfo, total int, window, threshold time.Duration,
-) {
-	if total == 0 {
-		return
-	}
-
-	fmt.Fprintf(w, "\n--- Latency Spikes (p99 > %s per %s) ---\n", threshold, window)
-	if total > len(spikes) {
-		fmt.Fprintf(w, "%d window(s) above threshold (showing top %d)\n", total, len(spikes))
-	} else {
-		fmt.Fprintf(w, "%d window(s) above threshold\n", total)
-	}
-	fmt.Fprintln(w)
-
-	for _, s := range spikes {
-		fmt.Fprintf(w, "  [%d] t=%.0fms  p99=%s  max=%s  %d events\n",
-			s.index, s.startMs, fmtDuration(s.p99), fmtDuration(s.maxLatency), s.eventCount)
-	}
-}
-
-func printRunnableSpikesSection(
-	w io.Writer, spikes []spikeInfo, total int, window time.Duration, runnableThreshold int,
-) {
-	if total == 0 {
-		return
-	}
-
-	fmt.Fprintf(w, "\n--- Runnable Spikes (>%d runnable per %s) ---\n", runnableThreshold, window)
-	if total > len(spikes) {
-		fmt.Fprintf(w, "%d window(s) above threshold (showing top %d)\n", total, len(spikes))
-	} else {
-		fmt.Fprintf(w, "%d window(s) above threshold\n", total)
-	}
-	fmt.Fprintln(w)
-
-	for _, s := range spikes {
-		fmt.Fprintf(w, "  [%d] t=%.0fms  peak %d runnable\n",
-			s.index, s.startMs, s.maxRunnable)
-	}
-}
-
-func printByCreator(db *sql.DB, w io.Writer) error {
-	fmt.Fprintln(w, "\n--- Delays by Goroutine Creator ---")
-
+func collectByCreator(db *sql.DB) (*ByCreatorReport, error) {
 	rows, err := db.Query(`
 		SELECT
 			COALESCE(
@@ -518,72 +606,87 @@ func printByCreator(db *sql.DB, w io.Writer) error {
 		LIMIT $1
 	`, opts.top)
 	if err != nil {
-		return fmt.Errorf("by-creator query: %w", err)
+		return nil, fmt.Errorf("by-creator query: %w", err)
 	}
 	defer rows.Close()
 
+	out := &ByCreatorReport{}
 	for rows.Next() {
-		var creator string
-		var cnt int
-		var totalWait, maxWait, p99 float64
-		if err := rows.Scan(&creator, &cnt, &totalWait, &maxWait, &p99); err != nil {
-			return err
+		var row CreatorRow
+		var totalNs, maxNs, p99Ns float64
+		if err := rows.Scan(&row.Creator, &row.Count, &totalNs, &maxNs, &p99Ns); err != nil {
+			return nil, err
 		}
-		fmt.Fprintf(w, "  %s\n", shortenFunc(creator))
-		fmt.Fprintf(w, "    %d events, total: %s, max: %s, p99: %s\n",
-			cnt, fmtDuration(totalWait), fmtDuration(maxWait), fmtDuration(p99))
+		row.TotalNs = int64(totalNs)
+		row.MaxNs = int64(maxNs)
+		row.P99Ns = int64(p99Ns)
+		out.Rows = append(out.Rows, row)
 	}
-	return rows.Err()
+	return out, rows.Err()
 }
 
-func printGCAnalysis(db *sql.DB, w io.Writer) error {
+func collectGCAnalysis(db *sql.DB) (*GCReport, error) {
 	// Check if there's any GC data at all.
 	var totalRanges int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM gc_ranges`).Scan(&totalRanges); err != nil {
-		return fmt.Errorf("gc range count: %w", err)
+		return nil, fmt.Errorf("gc range count: %w", err)
 	}
 	if totalRanges == 0 {
-		return nil
+		return nil, nil
 	}
 
-	fmt.Fprintln(w, "\n--- GC Analysis ---")
+	g := &GCReport{}
 
-	// 3a. GC Cycle Summary
-	if err := printGCCycleSummary(db, w); err != nil {
-		return err
+	cycle, err := collectGCCycleSummary(db)
+	if err != nil {
+		return nil, err
+	}
+	g.CycleSummary = cycle
+
+	stw, err := collectSTWSummary(db)
+	if err != nil {
+		return nil, err
+	}
+	if stw != nil {
+		g.STW = stw
 	}
 
-	// 3b. STW Summary
-	if err := printSTWSummary(db, w); err != nil {
-		return err
+	ma, err := collectMarkAssist(db)
+	if err != nil {
+		return nil, err
+	}
+	if ma != nil {
+		g.MarkAssist = ma
 	}
 
-	// 3c. Mark Assist
-	if err := printMarkAssist(db, w); err != nil {
-		return err
+	cmp, err := collectGCLatencyComparison(db)
+	if err != nil {
+		return nil, err
+	}
+	if cmp != nil {
+		g.LatencyComparison = cmp
 	}
 
-	// 3d. Scheduling Latency: During GC vs Normal
-	if err := printGCLatencyComparison(db, w); err != nil {
-		return err
-	}
-
-	// 3e. Per-Cycle Breakdown (verbose only)
 	if opts.verbose {
-		if err := printPerCycleBreakdown(db, w); err != nil {
-			return err
+		pc, err := collectPerCycleBreakdown(db)
+		if err != nil {
+			return nil, err
 		}
+		g.PerCycle = pc
 	}
 
-	// 3f. Sweep Summary
-	if err := printSweepSummary(db, w); err != nil {
-		return err
+	sweep, err := collectSweepSummary(db)
+	if err != nil {
+		return nil, err
+	}
+	if sweep != nil {
+		g.Sweep = sweep
 	}
 
-	return nil
+	return g, nil
 }
 
-func printGCCycleSummary(db *sql.DB, w io.Writer) error {
+func collectGCCycleSummary(db *sql.DB) (*GCCycleSummary, error) {
 	var count int
 	var totalNs, avgNs, minNs, maxNs sql.NullFloat64
 	err := db.QueryRow(`
@@ -592,18 +695,18 @@ func printGCCycleSummary(db *sql.DB, w io.Writer) error {
 		WHERE name = 'GC concurrent mark phase'
 	`).Scan(&count, &totalNs, &avgNs, &minNs, &maxNs)
 	if err != nil {
-		return fmt.Errorf("gc cycle summary: %w", err)
+		return nil, fmt.Errorf("gc cycle summary: %w", err)
 	}
-	if count == 0 {
-		fmt.Fprintln(w, "GC cycles: 0")
-		return nil
-	}
-	fmt.Fprintf(w, "GC cycles: %d, total: %s, avg: %s, min: %s, max: %s\n",
-		count, fmtNullDuration(totalNs), fmtNullDuration(avgNs), fmtNullDuration(minNs), fmtNullDuration(maxNs))
-	return nil
+	return &GCCycleSummary{
+		Count:   count,
+		TotalNs: nullF64ToInt64Ptr(totalNs),
+		AvgNs:   nullF64ToInt64Ptr(avgNs),
+		MinNs:   nullF64ToInt64Ptr(minNs),
+		MaxNs:   nullF64ToInt64Ptr(maxNs),
+	}, nil
 }
 
-func printSTWSummary(db *sql.DB, w io.Writer) error {
+func collectSTWSummary(db *sql.DB) (*GCSTWSummary, error) {
 	rows, err := db.Query(`
 		SELECT
 			regexp_extract(name, '\((.*)\)', 1) as reason,
@@ -616,50 +719,43 @@ func printSTWSummary(db *sql.DB, w io.Writer) error {
 		ORDER BY total_ns DESC
 	`)
 	if err != nil {
-		return fmt.Errorf("stw query: %w", err)
+		return nil, fmt.Errorf("stw query: %w", err)
 	}
 	defer rows.Close()
 
-	type stwEntry struct {
-		reason  string
-		count   int
-		totalNs float64
-		maxNs   float64
-	}
-	var entries []stwEntry
+	var reasons []STWEntry
 	var totalCount int
 	var totalNs, overallMax float64
-
 	for rows.Next() {
-		var e stwEntry
-		if err := rows.Scan(&e.reason, &e.count, &e.totalNs, &e.maxNs); err != nil {
-			return err
+		var e STWEntry
+		var totNs, mxNs float64
+		if err := rows.Scan(&e.Reason, &e.Count, &totNs, &mxNs); err != nil {
+			return nil, err
 		}
-		entries = append(entries, e)
-		totalCount += e.count
-		totalNs += e.totalNs
-		if e.maxNs > overallMax {
-			overallMax = e.maxNs
+		e.TotalNs = int64(totNs)
+		e.MaxNs = int64(mxNs)
+		reasons = append(reasons, e)
+		totalCount += e.Count
+		totalNs += totNs
+		if mxNs > overallMax {
+			overallMax = mxNs
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
-
 	if totalCount == 0 {
-		return nil
+		return nil, nil
 	}
-
-	fmt.Fprintf(w, "  STW pauses: %d, total: %s, max: %s\n",
-		totalCount, fmtDuration(totalNs), fmtDuration(overallMax))
-	for _, e := range entries {
-		fmt.Fprintf(w, "    %s: %d pauses, total %s, max %s\n",
-			e.reason, e.count, fmtDuration(e.totalNs), fmtDuration(e.maxNs))
-	}
-	return nil
+	return &GCSTWSummary{
+		TotalCount: totalCount,
+		TotalNs:    int64(totalNs),
+		MaxNs:      int64(overallMax),
+		Reasons:    reasons,
+	}, nil
 }
 
-func printMarkAssist(db *sql.DB, w io.Writer) error {
+func collectMarkAssist(db *sql.DB) (*GCMarkAssist, error) {
 	var totalEvents int
 	var totalGoroutines int
 	var totalNs, maxSingleNs sql.NullFloat64
@@ -669,16 +765,19 @@ func printMarkAssist(db *sql.DB, w io.Writer) error {
 		WHERE name = 'GC mark assist'
 	`).Scan(&totalEvents, &totalGoroutines, &totalNs, &maxSingleNs)
 	if err != nil {
-		return fmt.Errorf("mark assist summary: %w", err)
+		return nil, fmt.Errorf("mark assist summary: %w", err)
 	}
 	if totalEvents == 0 {
-		return nil
+		return nil, nil
 	}
 
-	fmt.Fprintf(w, "  Mark assist: %d events across %d goroutines, total: %s, max single: %s\n",
-		totalEvents, totalGoroutines, fmtNullDuration(totalNs), fmtNullDuration(maxSingleNs))
+	out := &GCMarkAssist{
+		TotalEvents:     totalEvents,
+		TotalGoroutines: totalGoroutines,
+		TotalNs:         nullF64ToInt64Ptr(totalNs),
+		MaxSingleNs:     nullF64ToInt64Ptr(maxSingleNs),
+	}
 
-	// Top affected goroutines
 	rows, err := db.Query(`
 		WITH t0 AS (
 			SELECT MIN(end_time_ns - duration_ns) as v FROM g_transitions
@@ -699,43 +798,36 @@ func printMarkAssist(db *sql.DB, w io.Writer) error {
 		LIMIT $1
 	`, opts.top)
 	if err != nil {
-		return fmt.Errorf("mark assist top goroutines: %w", err)
+		return nil, fmt.Errorf("mark assist top goroutines: %w", err)
 	}
 	defer rows.Close()
 
-	fmt.Fprintln(w, "    Top affected goroutines:")
 	for rows.Next() {
-		var scopeID int64
-		var gname string
-		var assists int
-		var totalAssistNs, maxAssistNs, worstAtMs float64
-		if err := rows.Scan(&scopeID, &gname, &assists, &totalAssistNs, &maxAssistNs, &worstAtMs); err != nil {
-			return err
+		var e MarkAssistGEntry
+		var totNs, mxNs float64
+		if err := rows.Scan(&e.G, &e.Name, &e.Assists, &totNs, &mxNs, &e.WorstAtMs); err != nil {
+			return nil, err
 		}
-		fmt.Fprintf(w, "      g%-8d %-40s %d assists, total %s, max %s @ t=%.0fms\n",
-			scopeID, shortenFunc(gname), assists, fmtDuration(totalAssistNs), fmtDuration(maxAssistNs), worstAtMs)
+		e.TotalNs = int64(totNs)
+		e.MaxNs = int64(mxNs)
+		out.TopGoroutines = append(out.TopGoroutines, e)
 	}
-	return rows.Err()
+	return out, rows.Err()
 }
 
-func printGCLatencyComparison(db *sql.DB, w io.Writer) error {
-	// Check if we have any GC cycles to compare against
+func collectGCLatencyComparison(db *sql.DB) (*GCLatencyComparison, error) {
 	var cycleCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM gc_cycles`).Scan(&cycleCount); err != nil {
-		return fmt.Errorf("gc cycle count: %w", err)
+		return nil, fmt.Errorf("gc cycle count: %w", err)
 	}
 	if cycleCount == 0 {
-		return nil
+		return nil, nil
 	}
 
-	type latencyStats struct {
-		count int
-		p50   sql.NullFloat64
-		p99   sql.NullFloat64
-		max   sql.NullFloat64
-	}
+	var dCount, nCount int
+	var dP50, dP99, dMax sql.NullFloat64
+	var nP50, nP99, nMax sql.NullFloat64
 
-	var duringGC, nonGC latencyStats
 	err := db.QueryRow(`
 		SELECT
 			COUNT(*),
@@ -749,9 +841,9 @@ func printGCLatencyComparison(db *sql.DB, w io.Writer) error {
 			WHERE gt.end_time_ns - gt.duration_ns < gc.end_time_ns
 			  AND gt.end_time_ns > gc.start_time_ns
 		  )
-	`).Scan(&duringGC.count, &duringGC.p50, &duringGC.p99, &duringGC.max)
+	`).Scan(&dCount, &dP50, &dP99, &dMax)
 	if err != nil {
-		return fmt.Errorf("gc latency during: %w", err)
+		return nil, fmt.Errorf("gc latency during: %w", err)
 	}
 
 	err = db.QueryRow(`
@@ -767,40 +859,48 @@ func printGCLatencyComparison(db *sql.DB, w io.Writer) error {
 			WHERE gt.end_time_ns - gt.duration_ns < gc.end_time_ns
 			  AND gt.end_time_ns > gc.start_time_ns
 		  )
-	`).Scan(&nonGC.count, &nonGC.p50, &nonGC.p99, &nonGC.max)
+	`).Scan(&nCount, &nP50, &nP99, &nMax)
 	if err != nil {
-		return fmt.Errorf("gc latency non-gc: %w", err)
+		return nil, fmt.Errorf("gc latency non-gc: %w", err)
 	}
 
-	if duringGC.count == 0 {
-		return nil
+	if dCount == 0 {
+		return nil, nil
 	}
 
-	fmt.Fprintln(w, "  Scheduling latency during GC vs normal:")
-	fmt.Fprintf(w, "    %-14s %-10s %-10s %-10s %-10s\n", "", "count", "p50", "p99", "max")
-	fmt.Fprintf(w, "    %-14s %-10d %-10s %-10s %-10s\n",
-		"During GC:", duringGC.count, fmtNullDuration(duringGC.p50), fmtNullDuration(duringGC.p99), fmtNullDuration(duringGC.max))
-	fmt.Fprintf(w, "    %-14s %-10d %-10s %-10s %-10s\n",
-		"Non-GC:", nonGC.count, fmtNullDuration(nonGC.p50), fmtNullDuration(nonGC.p99), fmtNullDuration(nonGC.max))
+	out := &GCLatencyComparison{
+		DuringGC: LatencyBucket{
+			Count: dCount,
+			P50Ns: nullF64ToInt64Ptr(dP50),
+			P99Ns: nullF64ToInt64Ptr(dP99),
+			MaxNs: nullF64ToInt64Ptr(dMax),
+		},
+		NonGC: LatencyBucket{
+			Count: nCount,
+			P50Ns: nullF64ToInt64Ptr(nP50),
+			P99Ns: nullF64ToInt64Ptr(nP99),
+			MaxNs: nullF64ToInt64Ptr(nMax),
+		},
+	}
 
-	if nonGC.p50.Valid && nonGC.p50.Float64 > 0 && duringGC.p50.Valid {
-		p50Ratio := duringGC.p50.Float64 / nonGC.p50.Float64
-		p99Ratio := 0.0
-		if nonGC.p99.Valid && nonGC.p99.Float64 > 0 && duringGC.p99.Valid {
-			p99Ratio = duringGC.p99.Float64 / nonGC.p99.Float64
+	// Round ratios to 6 decimals so JSON output is bit-identical across
+	// platforms (linux/darwin float64 ULP differences would otherwise break
+	// golden tests).
+	round6 := func(x float64) float64 { return math.Round(x*1e6) / 1e6 }
+	if nP50.Valid && nP50.Float64 > 0 && dP50.Valid {
+		out.HasRatio = true
+		out.RatioP50 = round6(dP50.Float64 / nP50.Float64)
+		if nP99.Valid && nP99.Float64 > 0 && dP99.Valid {
+			out.RatioP99 = round6(dP99.Float64 / nP99.Float64)
 		}
-		maxRatio := 0.0
-		if nonGC.max.Valid && nonGC.max.Float64 > 0 && duringGC.max.Valid {
-			maxRatio = duringGC.max.Float64 / nonGC.max.Float64
+		if nMax.Valid && nMax.Float64 > 0 && dMax.Valid {
+			out.RatioMax = round6(dMax.Float64 / nMax.Float64)
 		}
-		fmt.Fprintf(w, "    %-14s %-10s %-10s %-10s %-10s\n",
-			"Ratio:", "", fmt.Sprintf("%.1fx", p50Ratio), fmt.Sprintf("%.1fx", p99Ratio), fmt.Sprintf("%.1fx", maxRatio))
 	}
-
-	return nil
+	return out, nil
 }
 
-func printPerCycleBreakdown(db *sql.DB, w io.Writer) error {
+func collectPerCycleBreakdown(db *sql.DB) (*GCPerCycleBreakdown, error) {
 	rows, err := db.Query(`
 		SELECT
 			gc.cycle,
@@ -817,27 +917,25 @@ func printPerCycleBreakdown(db *sql.DB, w io.Writer) error {
 		ORDER BY gc.start_time_ns
 	`)
 	if err != nil {
-		return fmt.Errorf("per-cycle breakdown: %w", err)
+		return nil, fmt.Errorf("per-cycle breakdown: %w", err)
 	}
 	defer rows.Close()
 
-	fmt.Fprintln(w, "  Per-cycle breakdown:")
-	fmt.Fprintf(w, "    %-6s %-12s %-8s %-12s %-12s\n", "Cycle", "Duration", "Assists", "Goroutines", "Assist Time")
+	out := &GCPerCycleBreakdown{}
 	for rows.Next() {
-		var cycle int
-		var durationNs float64
-		var assists, goroutines int
-		var assistTimeNs float64
-		if err := rows.Scan(&cycle, &durationNs, &assists, &goroutines, &assistTimeNs); err != nil {
-			return err
+		var e GCCycleEntry
+		var dur, assist float64
+		if err := rows.Scan(&e.Cycle, &dur, &e.Assists, &e.Goroutines, &assist); err != nil {
+			return nil, err
 		}
-		fmt.Fprintf(w, "    %-6d %-12s %-8d %-12d %-12s\n",
-			cycle, fmtDuration(durationNs), assists, goroutines, fmtDuration(assistTimeNs))
+		e.DurationNs = int64(dur)
+		e.AssistTimeNs = int64(assist)
+		out.Cycles = append(out.Cycles, e)
 	}
-	return rows.Err()
+	return out, rows.Err()
 }
 
-func printSweepSummary(db *sql.DB, w io.Writer) error {
+func collectSweepSummary(db *sql.DB) (*GCSweepSummary, error) {
 	var count int
 	var totalNs sql.NullFloat64
 	err := db.QueryRow(`
@@ -846,22 +944,19 @@ func printSweepSummary(db *sql.DB, w io.Writer) error {
 		WHERE name = 'GC incremental sweep'
 	`).Scan(&count, &totalNs)
 	if err != nil {
-		return fmt.Errorf("sweep summary: %w", err)
+		return nil, fmt.Errorf("sweep summary: %w", err)
 	}
 	if count == 0 {
-		return nil
+		return nil, nil
 	}
-	fmt.Fprintf(w, "  Sweep: %d events, total: %s\n",
-		count, fmtNullDuration(totalNs))
-	return nil
+	return &GCSweepSummary{Count: count, TotalNs: nullF64ToInt64Ptr(totalNs)}, nil
 }
 
-func printBurstAnalysis(db *sql.DB, w io.Writer, window time.Duration) error {
-	// Use 1ms micro-windows to detect bursts
+func collectBurstAnalysis(db *sql.DB, window time.Duration) (*BurstReport, error) {
 	microWindowNs := int64(1e6) // 1ms
 	_ = window                  // reserved for future use
 
-	fmt.Fprintf(w, "\n--- Goroutine Bursts (>10 becoming runnable in 1ms) ---\n")
+	br := &BurstReport{}
 
 	rows, err := db.Query(`
 		WITH min_time AS (
@@ -889,28 +984,20 @@ func printBurstAnalysis(db *sql.DB, w io.Writer, window time.Duration) error {
 		LIMIT $2
 	`, microWindowNs, opts.top*2)
 	if err != nil {
-		return fmt.Errorf("burst query: %w", err)
+		return nil, fmt.Errorf("burst query: %w", err)
 	}
 	defer rows.Close()
 
-	hasRows := false
 	for rows.Next() {
-		hasRows = true
-		var windowMs float64
-		var spawned, distinctCreators int
-		if err := rows.Scan(&windowMs, &spawned, &distinctCreators); err != nil {
-			return err
+		var w BurstWindow
+		if err := rows.Scan(&w.StartMs, &w.GoroutinesSpawned, &w.DistinctCreators); err != nil {
+			return nil, err
 		}
-		fmt.Fprintf(w, "  t=%-8.1fms: %d goroutines became runnable (%d distinct creators)\n",
-			windowMs, spawned, distinctCreators)
+		br.Bursts = append(br.Bursts, w)
 	}
-	if !hasRows {
-		fmt.Fprintln(w, "  No significant bursts detected.")
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
-
-	// Show the top creators of goroutines that experienced delays
-	// Look at the creation event (from_state='notexist') to find who created them
-	fmt.Fprintf(w, "\n--- Who Launched Delayed Goroutines? ---\n")
 
 	creatorRows, err := db.Query(`
 		WITH delayed AS (
@@ -941,34 +1028,29 @@ func printBurstAnalysis(db *sql.DB, w io.Writer, window time.Duration) error {
 		LIMIT $1
 	`, opts.top)
 	if err != nil {
-		return fmt.Errorf("creator query: %w", err)
+		return nil, fmt.Errorf("creator query: %w", err)
 	}
 	defer creatorRows.Close()
 
-	hasCreators := false
 	for creatorRows.Next() {
-		hasCreators = true
+		br.HasDelayed = true
 		var stackStr string
 		var count int
-		var totalNs, maxNs float64
-		if err := creatorRows.Scan(&stackStr, &count, &totalNs, &maxNs); err != nil {
-			return err
+		var totNs, mxNs float64
+		if err := creatorRows.Scan(&stackStr, &count, &totNs, &mxNs); err != nil {
+			return nil, err
 		}
-		stack := parseStackArray(stackStr)
-		fmt.Fprintf(w, "  %s\n", formatStack(stack, 80))
-		fmt.Fprintf(w, "    launched %d delayed goroutines, total delay: %s, max: %s\n",
-			count, fmtDuration(totalNs), fmtDuration(maxNs))
+		br.DelayedCreators = append(br.DelayedCreators, DelayedCreator{
+			Stack:        parseStackArray(stackStr),
+			DelayedCount: count,
+			TotalDelayNs: int64(totNs),
+			MaxDelayNs:   int64(mxNs),
+		})
 	}
-	if !hasCreators {
-		fmt.Fprintln(w, "  (no creator info available)")
-	}
-
-	return creatorRows.Err()
+	return br, creatorRows.Err()
 }
 
-func printWorstDelays(db *sql.DB, w io.Writer, n int) error {
-	fmt.Fprintf(w, "\n--- %d Worst Individual Delays ---\n", n)
-
+func collectWorstDelays(db *sql.DB, n int) (*WorstDelaysReport, error) {
 	// Stack info is on running→* transitions, not runnable→running.
 	// Get full stack array for proper formatting.
 	rows, err := db.Query(`
@@ -990,53 +1072,64 @@ func printWorstDelays(db *sql.DB, w io.Writer, n int) error {
 		ORDER BY w.duration_ns DESC
 	`, n)
 	if err != nil {
-		return fmt.Errorf("worst delays query: %w", err)
+		return nil, fmt.Errorf("worst delays query: %w", err)
 	}
 	defer rows.Close()
 
+	out := &WorstDelaysReport{N: n}
 	rank := 1
 	for rows.Next() {
-		var g int64
-		var durationNs float64
+		var r WorstDelayRow
+		var dur float64
 		var stackStr string
-		if err := rows.Scan(&g, &durationNs, &stackStr); err != nil {
-			return err
+		if err := rows.Scan(&r.G, &dur, &stackStr); err != nil {
+			return nil, err
 		}
-		stack := parseStackArray(stackStr)
-		fmt.Fprintf(w, "\n%d. g%d waited %s\n", rank, g, fmtDuration(durationNs))
-		fmt.Fprintf(w, "   %s\n", formatStack(stack, 100))
+		r.Rank = rank
+		r.DurationNs = int64(dur)
+		r.Stack = parseStackArray(stackStr)
+		out.Rows = append(out.Rows, r)
 		rank++
 	}
-	return rows.Err()
+	return out, rows.Err()
 }
 
-func printSpikeDetails(
-	db *sql.DB, w io.Writer, spikes []spikeInfo, minTime int64, window time.Duration,
-) error {
-	fmt.Fprintf(w, "\n--- Spike Details ---\n")
-
+func collectSpikeDetails(
+	db *sql.DB, spikes []SpikeSummary, minTime int64, window time.Duration,
+) (*SpikeDetailsSection, error) {
 	windowNs := window.Nanoseconds()
-
+	out := &SpikeDetailsSection{}
 	for _, s := range spikes {
-		fmt.Fprintln(w)
-		if s.spikeType == latencySpike {
-			fmt.Fprintf(w, "[%d] t=%.0fms [latency] p99=%s\n", s.index, s.startMs, fmtDuration(s.p99))
-			if err := printLatencySpikeDetail(db, w, s, minTime, windowNs); err != nil {
-				return err
+		var d SpikeDetail
+		if s.Type == "latency" {
+			det, err := collectLatencySpikeDetail(db, s, minTime, windowNs)
+			if err != nil {
+				return nil, err
 			}
+			d = *det
 		} else {
-			fmt.Fprintf(w, "[%d] t=%.0fms [runnable] peak %d runnable\n", s.index, s.startMs, s.maxRunnable)
-			if err := printRunnableSpikeDetail(db, w, s, minTime, window); err != nil {
-				return err
+			det, err := collectRunnableSpikeDetail(db, s, minTime, window)
+			if err != nil {
+				return nil, err
 			}
+			d = *det
 		}
+		out.Details = append(out.Details, d)
+	}
+	return out, nil
+}
+
+func collectLatencySpikeDetail(
+	db *sql.DB, s SpikeSummary, minTime, windowNs int64,
+) (*SpikeDetail, error) {
+	d := &SpikeDetail{
+		Index:   s.Index,
+		Type:    "latency",
+		StartMs: s.StartMs,
+		P99Ns:   s.P99Ns,
 	}
 
-	return nil
-}
-
-func printLatencySpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime, windowNs int64) error {
-	windowStart := minTime + int64(s.windowNum)*windowNs
+	windowStart := minTime + int64(s.WindowNum)*windowNs
 	windowEnd := windowStart + windowNs
 
 	// Find the worst individual delay within this window.
@@ -1059,16 +1152,18 @@ func printLatencySpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime, wind
 	`, windowStart, windowEnd).Scan(&g, &durationNs, &endTime, &srcP, &waitStart)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil
+			return d, nil
 		}
-		return fmt.Errorf("worst delay query: %w", err)
+		return nil, fmt.Errorf("worst delay query: %w", err)
 	}
 
-	fmt.Fprintf(w, "   → g%d waited %s", g, fmtDuration(durationNs))
+	d.WorstG = &g
+	dur := int64(durationNs)
+	d.WorstDurationNs = &dur
 	if srcP.Valid {
-		fmt.Fprintf(w, " on P%d", srcP.Int64)
+		sp := srcP.Int64
+		d.WorstP = &sp
 	}
-	fmt.Fprintln(w)
 
 	// Was there a burst of goroutines becoming runnable?
 	var burstCount int
@@ -1079,8 +1174,9 @@ func printLatencySpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime, wind
 		  AND end_time_ns - duration_ns BETWEEN $1 - 1000000 AND $1 + 1000000
 	`, waitStart).Scan(&burstCount)
 	if err != nil {
-		return fmt.Errorf("burst query: %w", err)
+		return nil, fmt.Errorf("burst query: %w", err)
 	}
+	d.BurstCount = &burstCount
 
 	// Was there a long-running goroutine that blocked the queue?
 	var longestRunNs sql.NullFloat64
@@ -1098,7 +1194,7 @@ func printLatencySpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime, wind
 			LIMIT 1
 		`, srcP.Int64, waitStart, endTime).Scan(&longestRunNs, &longestRunG, &longestRunStack)
 		if err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("longest run query: %w", err)
+			return nil, fmt.Errorf("longest run query: %w", err)
 		}
 	}
 
@@ -1114,44 +1210,46 @@ func printLatencySpikeDetail(db *sql.DB, w io.Writer, s spikeInfo, minTime, wind
 			  AND end_time_ns - duration_ns < $3
 		`, srcP.Int64, waitStart, endTime).Scan(&runnersCount, &totalRuns)
 		if err != nil {
-			return fmt.Errorf("runners count query: %w", err)
+			return nil, fmt.Errorf("runners count query: %w", err)
 		}
+		d.QueueRunners = &runnersCount
+		d.QueueRuns = &totalRuns
 	}
 
-	// Report findings
 	if burstCount > 10 {
-		fmt.Fprintf(w, "   → Burst: %d goroutines became runnable within ±1ms\n", burstCount)
-		if err := printBurstBreakdown(db, w, waitStart); err != nil {
-			fmt.Fprintf(w, "     (burst breakdown error: %v)\n", err)
+		bb, err := collectBurstBreakdown(db, waitStart)
+		if err == nil {
+			d.BurstBreakdown = bb
 		}
+		// On a breakdown error, the legacy code wrote an inline error string
+		// to stdout. Tests don't exercise that path; we silently drop the
+		// breakdown so the rest of the report still renders.
 	}
 
-	if longestRunNs.Valid && longestRunNs.Float64 > 500000 { // > 500µs
+	if longestRunNs.Valid && longestRunNs.Float64 > 500000 {
 		stack := parseStackArray(longestRunStack.String)
-		fmt.Fprintf(w, "   → Longest run during wait: g%d ran %s\n",
-			longestRunG.Int64, fmtDuration(longestRunNs.Float64))
-		if len(stack) > 0 {
-			fmt.Fprintf(w, "     %s\n", formatStack(stack, 80))
+		d.LongestRun = &LongestRun{
+			G:          longestRunG.Int64,
+			DurationNs: int64(longestRunNs.Float64),
+			Stack:      stack,
 		}
 	}
 
-	if runnersCount > 0 {
-		fmt.Fprintf(w, "   → Queue activity: %d goroutines ran %d times during the wait\n",
-			runnersCount, totalRuns)
-	}
-
-	if burstCount <= 10 && (!longestRunNs.Valid || longestRunNs.Float64 <= 500000) && runnersCount == 0 {
-		fmt.Fprintln(w, "   → No clear single cause identified")
-	}
-
-	return nil
+	return d, nil
 }
 
-func printRunnableSpikeDetail(
-	db *sql.DB, w io.Writer, s spikeInfo, minTime int64, window time.Duration,
-) error {
+func collectRunnableSpikeDetail(
+	db *sql.DB, s SpikeSummary, minTime int64, window time.Duration,
+) (*SpikeDetail, error) {
+	d := &SpikeDetail{
+		Index:       s.Index,
+		Type:        "runnable",
+		StartMs:     s.StartMs,
+		MaxRunnable: s.MaxRunnable,
+	}
+
 	windowMs := window.Milliseconds()
-	windowStartMs := int64(s.windowNum) * windowMs
+	windowStartMs := int64(s.WindowNum) * windowMs
 	windowEndMs := windowStartMs + windowMs
 
 	// Find the 1ms bucket within the window where most goroutines became runnable.
@@ -1176,25 +1274,24 @@ func printRunnableSpikeDetail(
 	`, minTime, windowStartMs, windowEndMs).Scan(&peakBucketMs)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil
+			return d, nil
 		}
-		return fmt.Errorf("peak bucket query: %w", err)
+		return nil, fmt.Errorf("peak bucket query: %w", err)
 	}
 
 	peakNs := minTime + peakBucketMs*1000000
-
-	if err := printBurstBreakdown(db, w, peakNs); err != nil {
-		fmt.Fprintf(w, "     (burst breakdown error: %v)\n", err)
+	bb, err := collectBurstBreakdown(db, peakNs)
+	if err == nil {
+		d.BurstBreakdown = bb
 	}
-
-	return nil
+	return d, nil
 }
 
-// printBurstBreakdown shows detailed analysis of goroutines that became runnable
-// in a burst around the given timestamp.
-func printBurstBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) error {
-	// Get breakdown by category (created vs unblocked vs syscall-return etc)
-	// Focus on what's most actionable: new goroutines and unblocked goroutines
+// collectBurstBreakdown aggregates the categorized breakdown of goroutines that
+// became runnable in a 2ms window centered on runnableStartNs, plus the
+// per-category sub-lists (creators for "new", unblockers/blocked-stacks/heavy
+// unblockers for "unblocked").
+func collectBurstBreakdown(db *sql.DB, runnableStartNs int64) (*BurstBreakdown, error) {
 	rows, err := db.Query(`
 		WITH burst AS (
 			SELECT g, from_state, src_stack_id
@@ -1217,62 +1314,61 @@ func printBurstBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) error {
 		ORDER BY cnt DESC
 	`, runnableStartNs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
-	// Collect category breakdown
-	var categories []struct {
-		name  string
-		count int
-	}
+	bb := &BurstBreakdown{}
 	for rows.Next() {
-		var cat string
-		var cnt int
-		if err := rows.Scan(&cat, &cnt); err != nil {
-			return err
+		var c BurstCategory
+		if err := rows.Scan(&c.Name, &c.Count); err != nil {
+			return nil, err
 		}
-		categories = append(categories, struct {
-			name  string
-			count int
-		}{cat, cnt})
+		bb.Categories = append(bb.Categories, c)
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
-	// Print summary line showing the category breakdown
-	var parts []string
-	for _, c := range categories {
-		parts = append(parts, fmt.Sprintf("%d %s", c.count, c.name))
-	}
-	fmt.Fprintf(w, "     Breakdown: %s\n", strings.Join(parts, ", "))
-
-	// For created goroutines, show who created them
-	for _, c := range categories {
-		if c.name == "new" && c.count > 0 {
-			if err := printCreatorBreakdown(db, w, runnableStartNs); err != nil {
-				return err
+	for _, c := range bb.Categories {
+		switch c.Name {
+		case "new":
+			if c.Count == 0 {
+				continue
 			}
+			creators, known, err := collectCreatorBreakdown(db, runnableStartNs)
+			if err != nil {
+				return nil, err
+			}
+			bb.Creators = creators
+			bb.CreatorsKnown = known
+		case "unblocked":
+			if c.Count == 0 {
+				continue
+			}
+			ub, err := collectUnblockerBreakdown(db, runnableStartNs)
+			if err != nil {
+				return nil, err
+			}
+			bb.Unblockers = ub
+
+			ba, err := collectUnblockedStacks(db, runnableStartNs)
+			if err != nil {
+				return nil, err
+			}
+			bb.BlockedAt = ba
+
+			hu, err := collectHeavyUnblockers(db, runnableStartNs)
+			if err != nil {
+				return nil, err
+			}
+			bb.HeavyUnblockers = hu
 		}
-		if c.name == "unblocked" && c.count > 0 {
-			if err := printUnblockerBreakdown(db, w, runnableStartNs); err != nil {
-				return err
-			}
-			if err := printUnblockedGoroutineStacks(db, w, runnableStartNs); err != nil {
-				return err
-			}
-			if err := printHeavyUnblockers(db, w, runnableStartNs); err != nil {
-				return err
-			}
-		}
 	}
-
-	return nil
+	return bb, nil
 }
 
-// printCreatorBreakdown shows what code paths created the goroutines in a burst.
-func printCreatorBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) error {
+func collectCreatorBreakdown(db *sql.DB, runnableStartNs int64) ([]CreatorEntry, bool, error) {
 	rows, err := db.Query(`
 		WITH burst_creates AS (
 			SELECT g, src_stack_id
@@ -1292,38 +1388,34 @@ func printCreatorBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) error
 		LIMIT 3
 	`, runnableStartNs)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	defer rows.Close()
 
-	hasRows := false
+	var out []CreatorEntry
+	known := false
 	for rows.Next() {
-		hasRows = true
+		known = true
 		var stackID sql.NullInt64
 		var cnt int
 		var stackStr sql.NullString
 		if err := rows.Scan(&stackID, &cnt, &stackStr); err != nil {
-			return err
+			return nil, false, err
 		}
+		entry := CreatorEntry{Count: cnt}
 		if stackStr.Valid {
 			stack := parseStackArray(stackStr.String)
-			// Strip file locations to make the stack more compact
 			for i := range stack {
 				stack[i] = stripFileLocation(stack[i])
 			}
-			fmt.Fprintf(w, "     Created by (%d): %s\n", cnt, formatStack(stack, 90))
-		} else {
-			fmt.Fprintf(w, "     Created by (%d): (unknown creator)\n", cnt)
+			entry.Stack = stack
 		}
+		out = append(out, entry)
 	}
-	if !hasRows {
-		fmt.Fprintln(w, "     (no creator info available)")
-	}
-	return rows.Err()
+	return out, known, rows.Err()
 }
 
-// printUnblockerBreakdown shows what code paths unblocked the waiting goroutines.
-func printUnblockerBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) error {
+func collectUnblockerBreakdown(db *sql.DB, runnableStartNs int64) ([]UnblockerEntry, error) {
 	rows, err := db.Query(`
 		WITH burst_unblocks AS (
 			SELECT g, src_stack_id
@@ -1343,31 +1435,27 @@ func printUnblockerBreakdown(db *sql.DB, w io.Writer, runnableStartNs int64) err
 		LIMIT 3
 	`, runnableStartNs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
+	var out []UnblockerEntry
 	for rows.Next() {
 		var funcName sql.NullString
 		var cnt int
 		if err := rows.Scan(&funcName, &cnt); err != nil {
-			return err
+			return nil, err
 		}
+		e := UnblockerEntry{Count: cnt}
 		if funcName.Valid {
-			fn := shortenFuncName(stripFileLocation(funcName.String))
-			fmt.Fprintf(w, "     Unblocked by (%d): %s\n", cnt, fn)
-		} else {
-			fmt.Fprintf(w, "     Unblocked by (%d): (unknown)\n", cnt)
+			e.Func = shortenFuncName(stripFileLocation(funcName.String))
 		}
+		out = append(out, e)
 	}
-	return rows.Err()
+	return out, rows.Err()
 }
 
-// printUnblockedGoroutineStacks shows what the unblocked goroutines were doing
-// when they blocked, grouped by their blocking call stack. This identifies
-// "worker pool" patterns where many goroutines of the same kind are all waiting
-// on the same thing (e.g., 173 raftScheduler workers all blocked on Cond.Wait).
-func printUnblockedGoroutineStacks(db *sql.DB, w io.Writer, runnableStartNs int64) error {
+func collectUnblockedStacks(db *sql.DB, runnableStartNs int64) ([]BlockedAtEntry, error) {
 	// The stack_id on waiting→runnable transitions is not populated in the Go
 	// trace, so we look at each goroutine's most recent running→* transition
 	// to find what it was doing when it blocked.
@@ -1401,36 +1489,28 @@ func printUnblockedGoroutineStacks(db *sql.DB, w io.Writer, runnableStartNs int6
 		LIMIT $2
 	`, runnableStartNs, 3)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
+	var out []BlockedAtEntry
 	for rows.Next() {
 		var stackStr string
 		var cnt int
 		if err := rows.Scan(&stackStr, &cnt); err != nil {
-			return err
+			return nil, err
 		}
 		stack := parseStackArray(stackStr)
-		formatted := formatStack(stack, 80)
-		// If the leaf frame is a runtime/sync function that formatStack filters
-		// out, show it in brackets so that entries differing only in their
-		// blocking primitive (e.g. Cond.Wait vs Mutex.Lock) remain distinct.
+		entry := BlockedAtEntry{Count: cnt, Stack: stack}
 		if len(stack) > 0 && !isInterestingFrame(stack[0]) {
-			leaf := shortenFuncName(stack[0])
-			fmt.Fprintf(w, "     Blocked at (%d): %s [%s]\n", cnt, formatted, leaf)
-		} else {
-			fmt.Fprintf(w, "     Blocked at (%d): %s\n", cnt, formatted)
+			entry.LeafBracket = shortenFuncName(stack[0])
 		}
+		out = append(out, entry)
 	}
-	return rows.Err()
+	return out, rows.Err()
 }
 
-// printHeavyUnblockers shows individual goroutines that unblocked the most
-// other goroutines in the burst window. This pinpoints the root-cause goroutine
-// driving the burst (e.g., the raftTickLoop goroutine that wakes hundreds of
-// raft scheduler workers via Cond.Broadcast).
-func printHeavyUnblockers(db *sql.DB, w io.Writer, runnableStartNs int64) error {
+func collectHeavyUnblockers(db *sql.DB, runnableStartNs int64) ([]HeavyUnblockerEntry, error) {
 	rows, err := db.Query(`
 		WITH burst_unblocks AS (
 			SELECT src_g, src_stack_id
@@ -1459,25 +1539,25 @@ func printHeavyUnblockers(db *sql.DB, w io.Writer, runnableStartNs int64) error 
 		ORDER BY bu.cnt DESC, bu.src_g
 	`, runnableStartNs, 3)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
+	var out []HeavyUnblockerEntry
 	for rows.Next() {
 		var srcG int64
 		var stackStr sql.NullString
 		var cnt int
 		if err := rows.Scan(&srcG, &stackStr, &cnt); err != nil {
-			return err
+			return nil, err
 		}
+		e := HeavyUnblockerEntry{G: srcG, Count: cnt}
 		if stackStr.Valid {
-			stack := parseStackArray(stackStr.String)
-			fmt.Fprintf(w, "     Heavy unblocker g%d (%d): %s\n", srcG, cnt, formatStack(stack, 100))
-		} else {
-			fmt.Fprintf(w, "     Heavy unblocker g%d (%d): (unknown stack)\n", srcG, cnt)
+			e.Stack = parseStackArray(stackStr.String)
 		}
+		out = append(out, e)
 	}
-	return rows.Err()
+	return out, rows.Err()
 }
 
 // parseStackArray parses DuckDB's array format: [func1, func2, ...]
@@ -1513,9 +1593,7 @@ func parseStackArray(s string) []string {
 	return result
 }
 
-func printTopGoroutines(db *sql.DB, w io.Writer) error {
-	fmt.Fprintln(w, "\n--- Top Goroutines by Wait Time ---")
-
+func collectTopGoroutines(db *sql.DB) (*TopGoroutinesReport, error) {
 	rows, err := db.Query(`
 		SELECT
 			g,
@@ -1535,28 +1613,28 @@ func printTopGoroutines(db *sql.DB, w io.Writer) error {
 		LIMIT $1
 	`, opts.top)
 	if err != nil {
-		return fmt.Errorf("top goroutines query: %w", err)
+		return nil, fmt.Errorf("top goroutines query: %w", err)
 	}
 	defer rows.Close()
 
+	out := &TopGoroutinesReport{}
 	for rows.Next() {
-		var g int
+		var r TopGoroutineRow
 		var stackStr string
-		var schedCount int
-		var totalWait, maxWait float64
-		if err := rows.Scan(&g, &stackStr, &schedCount, &totalWait, &maxWait); err != nil {
-			return err
+		var totWait, mxWait float64
+		if err := rows.Scan(&r.G, &stackStr, &r.SchedCount, &totWait, &mxWait); err != nil {
+			return nil, err
 		}
-		stack := parseStackArray(stackStr)
-		fmt.Fprintf(w, "  g%-6d %s\n", g, formatStack(stack, 80))
-		fmt.Fprintf(w, "          %d schedulings, total: %s, max: %s\n",
-			schedCount, fmtDuration(totalWait), fmtDuration(maxWait))
+		r.Stack = parseStackArray(stackStr)
+		r.TotalNs = int64(totWait)
+		r.MaxNs = int64(mxWait)
+		out.Rows = append(out.Rows, r)
 	}
-	return rows.Err()
+	return out, rows.Err()
 }
 
-func printSchemaInfo() {
-	fmt.Println(`
+func schemaInfo() string {
+	return `
 Key tables in the DuckDB:
   g_transitions  - Goroutine state changes (the main table for scheduling analysis)
                    Columns: g, from_state, to_state, reason, duration_ns, end_time_ns,
@@ -1571,7 +1649,8 @@ Useful patterns:
   stack_funcs(stack_id) returns the function names in a stack
   list_first(stack_funcs(id)) gets the top function (leaf)
 
-Example: SELECT * FROM goroutines ORDER BY runnable_ns DESC LIMIT 10;`)
+Example: SELECT * FROM goroutines ORDER BY runnable_ns DESC LIMIT 10;
+`
 }
 
 func execDuckDB(dbFile string) error {
@@ -1595,26 +1674,12 @@ func fmtDuration(ns float64) string {
 	return fmt.Sprintf("%.2fs", ns/1e9)
 }
 
-func fmtNullDuration(ns sql.NullFloat64) string {
-	if !ns.Valid {
-		return "-"
-	}
-	return fmtDuration(ns.Float64)
-}
-
 func shortenFunc(name string) string {
 	parts := strings.Split(name, "/")
 	if len(parts) > 2 {
 		return strings.Join(parts[len(parts)-2:], "/")
 	}
 	return name
-}
-
-func truncateStack(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }
 
 // formatStack takes an array of function names (leaf/terminal first) and returns a

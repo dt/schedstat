@@ -32,7 +32,12 @@ schedstat --gc trace.out             # GC-related state transitions
 # Power user
 schedstat --sql trace.out            # drop into DuckDB shell after analysis
 schedstat --keep-db trace.out        # keep .duckdb file for later exploration
+schedstat --json trace.out           # emit one JSON object per trace (NDJSON for multiple)
 ```
+
+`--json` returns the same data as the plaintext view, with all durations as raw
+nanoseconds. For multi-trace runs the output is newline-delimited JSON, so
+`schedstat --json *.bin | jq -c '.trace_file, .overall.p99_ns'` works.
 
 ## Output
 
@@ -98,6 +103,8 @@ The default output includes:
 | `--top-waiters` | `false` | Show goroutines with most total wait time |
 | `--keep-db` | `false` | Keep DuckDB file after analysis |
 | `--sql` | `false` | Drop into DuckDB shell after analysis |
+| `--json` | `false` | Emit JSON (NDJSON for multiple traces) instead of plaintext |
+| `--concurrency` | `0` | Number of trace files to process in parallel (0 = GOMAXPROCS) |
 | `-v`, `--verbose` | `false` | Verbose output |
 
 ## Collecting a trace

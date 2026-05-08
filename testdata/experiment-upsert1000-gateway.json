@@ -1,0 +1,1169 @@
+{
+  "trace_file": "experiment-upsert1000-gateway.bin",
+  "duration_ms": 10001.069248,
+  "overall": {
+    "count": 1554412,
+    "min_ns": 1,
+    "avg_ns": 63540,
+    "p50_ns": 21376,
+    "p90_ns": 169728,
+    "p99_ns": 521792,
+    "max_ns": 9440000
+  },
+  "latency_spikes": {
+    "kind": "latency",
+    "window_label": "100ms",
+    "latency_threshold": "1ms",
+    "total": 1,
+    "spikes": [
+      {
+        "index": 1,
+        "window_num": 42,
+        "start_ms": 4200,
+        "event_count": 12933,
+        "p99_ns": 6846328,
+        "max_latency_ns": 9440000
+      }
+    ]
+  },
+  "runnable_spikes": {
+    "kind": "runnable",
+    "window_label": "100ms",
+    "runnable_threshold": 40,
+    "total": 100,
+    "spikes": [
+      {
+        "index": 2,
+        "window_num": 42,
+        "start_ms": 4200,
+        "max_runnable": 542
+      },
+      {
+        "index": 3,
+        "window_num": 98,
+        "start_ms": 9800,
+        "max_runnable": 237
+      },
+      {
+        "index": 4,
+        "window_num": 67,
+        "start_ms": 6700,
+        "max_runnable": 221
+      },
+      {
+        "index": 5,
+        "window_num": 97,
+        "start_ms": 9700,
+        "max_runnable": 219
+      },
+      {
+        "index": 6,
+        "window_num": 18,
+        "start_ms": 1800,
+        "max_runnable": 190
+      }
+    ]
+  },
+  "spike_details": {
+    "details": [
+      {
+        "index": 1,
+        "type": "latency",
+        "start_ms": 4200,
+        "p99_ns": 6846328,
+        "worst_g": 852,
+        "worst_duration_ns": 9440000,
+        "worst_p": 6,
+        "burst_count": 125,
+        "longest_run": {
+          "g": 901,
+          "duration_ns": 886848,
+          "stack": [
+            "sync.(*Mutex).Lock",
+            "github.com/cockroachdb/pebble.(*commitPipeline).prepare",
+            "github.com/cockroachdb/pebble.(*commitPipeline).Commit",
+            "github.com/cockroachdb/pebble.(*DB).applyInternal",
+            "github.com/cockroachdb/pebble.(*DB).ApplyNoSyncWait",
+            "github.com/cockroachdb/cockroach/pkg/storage.(*writeBatch).CommitNoSyncWait",
+            "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).storeEntriesAndCommitBatch",
+            "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).StoreEntries",
+            "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaLogStorage).appendRaftMuLocked",
+            "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+            "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+            "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+            "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+            "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+          ]
+        },
+        "queue_runners": 174,
+        "queue_runs": 176,
+        "burst_breakdown": {
+          "categories": [
+            {
+              "name": "unblocked",
+              "count": 139
+            }
+          ],
+          "unblockers": [
+            {
+              "count": 94,
+              "func": "selectgo"
+            },
+            {
+              "count": 10,
+              "func": "systemstack_switch"
+            },
+            {
+              "count": 8,
+              "func": "(*Cond).Signal"
+            }
+          ],
+          "blocked_at": [
+            {
+              "count": 94,
+              "stack": [
+                "runtime.selectgo",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*pooledStream[...]).runOnce",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*pooledStream[...]).run",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*streamPool[...]).newPooledStream.func2"
+              ],
+              "leaf_bracket": "selectgo"
+            },
+            {
+              "count": 10,
+              "stack": [
+                "runtime.gopark",
+                "runtime.gcBgMarkWorker"
+              ],
+              "leaf_bracket": "gopark"
+            },
+            {
+              "count": 9,
+              "stack": [
+                "internal/poll.(*FD).Read",
+                "net.(*netFD).Read",
+                "net.(*conn).Read",
+                "bufio.(*Reader).Read",
+                "io.ReadAtLeast",
+                "io.ReadFull",
+                "golang.org/x/net/http2.readFrameHeader",
+                "golang.org/x/net/http2.(*Framer).ReadFrameHeader",
+                "golang.org/x/net/http2.(*Framer).ReadFrame",
+                "google.golang.org/grpc/internal/transport.(*http2Client).reader"
+              ],
+              "leaf_bracket": "(*FD).Read"
+            }
+          ],
+          "heavy_unblockers": [
+            {
+              "g": 841,
+              "count": 4,
+              "stack": [
+                "sync.(*Mutex).Unlock",
+                "github.com/cockroachdb/pebble.(*commitPipeline).prepare",
+                "github.com/cockroachdb/pebble.(*commitPipeline).Commit",
+                "github.com/cockroachdb/pebble.(*DB).applyInternal",
+                "github.com/cockroachdb/pebble.(*DB).ApplyNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/storage.(*writeBatch).CommitNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).storeEntriesAndCommitBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).StoreEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaLogStorage).appendRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ]
+            },
+            {
+              "g": 917,
+              "count": 4,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            },
+            {
+              "g": 2228028,
+              "count": 4,
+              "stack": [
+                "sync.(*WaitGroup).Add",
+                "sync.(*WaitGroup).Done",
+                "github.com/cockroachdb/pebble/record.(*syncQueue).pop",
+                "github.com/cockroachdb/pebble/record.(*pendingSyncsWithSyncQueue).pop",
+                "github.com/cockroachdb/pebble/record.(*LogWriter).flushPending",
+                "github.com/cockroachdb/pebble/record.(*LogWriter).flushLoop",
+                "runtime/pprof.Do",
+                "github.com/cockroachdb/pebble/record.NewLogWriter.func2"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "index": 2,
+        "type": "runnable",
+        "start_ms": 4200,
+        "max_runnable": 542,
+        "burst_breakdown": {
+          "categories": [
+            {
+              "name": "unblocked",
+              "count": 1214
+            },
+            {
+              "name": "preempted",
+              "count": 229
+            },
+            {
+              "name": "new",
+              "count": 1
+            }
+          ],
+          "creators": [
+            {
+              "count": 1,
+              "stack": [
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).Async",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).MaybeAddAsync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaAppBatch).ApplyToStateMachine",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).applyOneBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).ApplyCommittedEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ]
+            }
+          ],
+          "unblockers": [
+            {
+              "count": 832,
+              "func": "(*Cond).Signal"
+            },
+            {
+              "count": 195,
+              "func": "(*WaitGroup).Add"
+            },
+            {
+              "count": 157,
+              "func": "(*Mutex).Unlock"
+            }
+          ],
+          "blocked_at": [
+            {
+              "count": 832,
+              "stack": [
+                "sync.(*Cond).Wait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*Cond).Wait"
+            },
+            {
+              "count": 152,
+              "stack": [
+                "sync.(*WaitGroup).Wait",
+                "github.com/cockroachdb/pebble.(*commitPipeline).publish",
+                "github.com/cockroachdb/pebble.(*commitPipeline).Commit",
+                "github.com/cockroachdb/pebble.(*DB).applyInternal",
+                "github.com/cockroachdb/pebble.(*DB).ApplyNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/storage.(*writeBatch).CommitNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).storeEntriesAndCommitBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).StoreEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaLogStorage).appendRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*WaitGroup).Wait"
+            },
+            {
+              "count": 40,
+              "stack": [
+                "sync.(*Mutex).Lock",
+                "github.com/cockroachdb/pebble.(*commitPipeline).prepare",
+                "github.com/cockroachdb/pebble.(*commitPipeline).Commit",
+                "github.com/cockroachdb/pebble.(*DB).applyInternal",
+                "github.com/cockroachdb/pebble.(*DB).ApplyNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/storage.(*writeBatch).CommitNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).storeEntriesAndCommitBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).StoreEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaLogStorage).appendRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*Mutex).Lock"
+            }
+          ],
+          "heavy_unblockers": [
+            {
+              "g": 1222,
+              "count": 389,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).HandleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).handleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1.1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1"
+              ]
+            },
+            {
+              "g": 916,
+              "count": 160,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            },
+            {
+              "g": 919,
+              "count": 121,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "index": 3,
+        "type": "runnable",
+        "start_ms": 9800,
+        "max_runnable": 237,
+        "burst_breakdown": {
+          "categories": [
+            {
+              "name": "unblocked",
+              "count": 1013
+            },
+            {
+              "name": "new",
+              "count": 4
+            },
+            {
+              "name": "preempted",
+              "count": 2
+            }
+          ],
+          "creators": [
+            {
+              "count": 4,
+              "stack": [
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).Async",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).MaybeAddAsync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaAppBatch).ApplyToStateMachine",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).applyOneBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).ApplyCommittedEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ]
+            }
+          ],
+          "unblockers": [
+            {
+              "count": 694,
+              "func": "(*Cond).Signal"
+            },
+            {
+              "count": 170,
+              "func": "(*Mutex).Unlock"
+            },
+            {
+              "count": 121,
+              "func": "(*WaitGroup).Add"
+            }
+          ],
+          "blocked_at": [
+            {
+              "count": 692,
+              "stack": [
+                "sync.(*Cond).Wait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*Cond).Wait"
+            },
+            {
+              "count": 86,
+              "stack": [
+                "sync.(*WaitGroup).Wait",
+                "github.com/cockroachdb/pebble.(*commitPipeline).publish",
+                "github.com/cockroachdb/pebble.(*commitPipeline).Commit",
+                "github.com/cockroachdb/pebble.(*DB).applyInternal",
+                "github.com/cockroachdb/pebble.(*DB).ApplyNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/storage.(*writeBatch).CommitNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).storeEntriesAndCommitBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).StoreEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaLogStorage).appendRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*WaitGroup).Wait"
+            },
+            {
+              "count": 60,
+              "stack": [
+                "sync.(*Mutex).Lock",
+                "github.com/cockroachdb/pebble.(*commitPipeline).prepare",
+                "github.com/cockroachdb/pebble.(*commitPipeline).Commit",
+                "github.com/cockroachdb/pebble.(*DB).applyInternal",
+                "github.com/cockroachdb/pebble.(*DB).ApplyNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/storage.(*writeBatch).CommitNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).storeEntriesAndCommitBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).StoreEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaLogStorage).appendRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*Mutex).Lock"
+            }
+          ],
+          "heavy_unblockers": [
+            {
+              "g": 916,
+              "count": 169,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            },
+            {
+              "g": 1222,
+              "count": 161,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).HandleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).handleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1.1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1"
+              ]
+            },
+            {
+              "g": 919,
+              "count": 160,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "index": 4,
+        "type": "runnable",
+        "start_ms": 6700,
+        "max_runnable": 221,
+        "burst_breakdown": {
+          "categories": [
+            {
+              "name": "unblocked",
+              "count": 1160
+            },
+            {
+              "name": "new",
+              "count": 356
+            },
+            {
+              "name": "preempted",
+              "count": 96
+            }
+          ],
+          "creators": [
+            {
+              "count": 352,
+              "stack": [
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*DistSender).sendPartialBatchAsync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*DistSender).divideAndSendBatchToRanges",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*DistSender).divideAndSendParallelCommit",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*DistSender).Send",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnLockGatekeeper).SendLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnMetricRecorder).SendLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnSpanRefresher).sendLockedWithRefreshAttempts",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnSpanRefresher).SendLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnCommitter).SendLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnPipeliner).SendLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnWriteBuffer).flushBufferAndSendBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnWriteBuffer).SendLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnSeqNumAllocator).SendLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*txnHeartbeater).SendLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*TxnCoordSender).Send",
+                "github.com/cockroachdb/cockroach/pkg/kv.(*DB).sendUsingSender",
+                "github.com/cockroachdb/cockroach/pkg/kv.(*Txn).Send",
+                "github.com/cockroachdb/cockroach/pkg/kv.sendAndFill",
+                "github.com/cockroachdb/cockroach/pkg/kv.(*Txn).Run",
+                "github.com/cockroachdb/cockroach/pkg/kv.(*Txn).CommitInBatch",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*tableWriterBase).finalize",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*upsertNode).processBatch",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*upsertNode).startExec",
+                "github.com/cockroachdb/cockroach/pkg/sql.startExec",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*planNodeToRowSource).Start",
+                "github.com/cockroachdb/cockroach/pkg/sql/colexec.(*Columnarizer).Init",
+                "github.com/cockroachdb/cockroach/pkg/sql/colflow.(*BatchFlowCoordinator).Run.(*BatchFlowCoordinator).init.func2",
+                "github.com/cockroachdb/cockroach/pkg/sql/colexecerror.CatchVectorizedRuntimeError",
+                "github.com/cockroachdb/cockroach/pkg/sql/colflow.(*BatchFlowCoordinator).init",
+                "github.com/cockroachdb/cockroach/pkg/sql/colflow.(*BatchFlowCoordinator).Run",
+                "github.com/cockroachdb/cockroach/pkg/sql/colflow.(*vectorizedFlow).Run",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*DistSQLPlanner).Run",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*DistSQLPlanner).PlanAndRun",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*DistSQLPlanner).PlanAndRunAll.func3",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*DistSQLPlanner).PlanAndRunAll",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).execWithDistSQLEngine",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).dispatchToExecutionEngine",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).execStmtInOpenState",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).execStmt.func2",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).execWithProfiling",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).execStmt",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).execPortal",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).execCmd.func2",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).execCmd",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*connExecutor).run",
+                "github.com/cockroachdb/cockroach/pkg/sql.(*Server).ServeConn",
+                "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*conn).processCommands",
+                "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4"
+              ]
+            },
+            {
+              "count": 3,
+              "stack": [
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).Async",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).MaybeAddAsync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaAppBatch).ApplyToStateMachine",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).applyOneBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).ApplyCommittedEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ]
+            },
+            {
+              "count": 1,
+              "stack": [
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).Async",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).MaybeAddAsync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaAppBatch).ApplyToStateMachine",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).applyOneBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).ApplyCommittedEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ]
+            }
+          ],
+          "unblockers": [
+            {
+              "count": 380,
+              "func": "selectnbsend"
+            },
+            {
+              "count": 315,
+              "func": "chansend1"
+            },
+            {
+              "count": 241,
+              "func": "(*Cond).Signal"
+            }
+          ],
+          "blocked_at": [
+            {
+              "count": 315,
+              "stack": [
+                "runtime.selectgo",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*pooledStream[...]).Send",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*streamPool[...]).Send",
+                "github.com/cockroachdb/cockroach/pkg/rpc/nodedialer.(*batchStreamPoolClient).Batch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*grpcTransport).sendBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*grpcTransport).SendNext",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*DistSender).sendToReplicas",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*DistSender).sendPartialBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvclient/kvcoord.(*DistSender).sendPartialBatchAsync.func1"
+              ],
+              "leaf_bracket": "selectgo"
+            },
+            {
+              "count": 315,
+              "stack": [
+                "runtime.selectgo",
+                "google.golang.org/grpc/internal/transport.(*recvBufferReader).readClient",
+                "google.golang.org/grpc/internal/transport.(*recvBufferReader).Read",
+                "google.golang.org/grpc/internal/transport.(*transportReader).Read",
+                "io.ReadAtLeast",
+                "io.ReadFull",
+                "google.golang.org/grpc/internal/transport.(*Stream).Read",
+                "google.golang.org/grpc.(*parser).recvMsg",
+                "google.golang.org/grpc.recvAndDecompress",
+                "google.golang.org/grpc.recv",
+                "google.golang.org/grpc.(*csAttempt).recvMsg",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvpb.(*internalBatchStreamClient).Recv.(*clientStream).RecvMsg.func1",
+                "google.golang.org/grpc.(*clientStream).withRetry",
+                "google.golang.org/grpc.(*clientStream).RecvMsg",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvpb.(*internalBatchStreamClient).Recv",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*pooledStream[...]).runOnce",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*pooledStream[...]).run",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*streamPool[...]).newPooledStream.func2"
+              ],
+              "leaf_bracket": "selectgo"
+            },
+            {
+              "count": 240,
+              "stack": [
+                "sync.(*Cond).Wait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*Cond).Wait"
+            }
+          ],
+          "heavy_unblockers": [
+            {
+              "g": 1012,
+              "count": 315,
+              "stack": [
+                "runtime.selectnbsend",
+                "google.golang.org/grpc/internal/transport.(*recvBuffer).put",
+                "google.golang.org/grpc/internal/transport.(*Stream).write",
+                "google.golang.org/grpc/internal/transport.(*http2Client).handleData",
+                "google.golang.org/grpc/internal/transport.(*http2Client).reader"
+              ]
+            },
+            {
+              "g": 1222,
+              "count": 79,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).HandleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).handleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1.1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1"
+              ]
+            },
+            {
+              "g": 917,
+              "count": 49,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "index": 5,
+        "type": "runnable",
+        "start_ms": 9700,
+        "max_runnable": 219,
+        "burst_breakdown": {
+          "categories": [
+            {
+              "name": "unblocked",
+              "count": 1410
+            },
+            {
+              "name": "new",
+              "count": 6
+            },
+            {
+              "name": "preempted",
+              "count": 5
+            }
+          ],
+          "creators": [
+            {
+              "count": 4,
+              "stack": [
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).Async",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).MaybeAddAsync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaAppBatch).ApplyToStateMachine",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).applyOneBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).ApplyCommittedEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ]
+            },
+            {
+              "count": 2,
+              "stack": [
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).Async",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).MaybeAddAsync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaAppBatch).ApplyToStateMachine",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).applyOneBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).ApplyCommittedEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ]
+            }
+          ],
+          "unblockers": [
+            {
+              "count": 829,
+              "func": "(*Cond).Signal"
+            },
+            {
+              "count": 297,
+              "func": "(*WaitGroup).Add"
+            },
+            {
+              "count": 260,
+              "func": "(*Mutex).Unlock"
+            }
+          ],
+          "blocked_at": [
+            {
+              "count": 828,
+              "stack": [
+                "sync.(*Cond).Wait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*Cond).Wait"
+            },
+            {
+              "count": 184,
+              "stack": [
+                "sync.(*WaitGroup).Wait",
+                "github.com/cockroachdb/pebble.(*commitPipeline).publish",
+                "github.com/cockroachdb/pebble.(*commitPipeline).Commit",
+                "github.com/cockroachdb/pebble.(*DB).applyInternal",
+                "github.com/cockroachdb/pebble.(*DB).ApplyNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/storage.(*writeBatch).CommitNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).storeEntriesAndCommitBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).StoreEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaLogStorage).appendRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*WaitGroup).Wait"
+            },
+            {
+              "count": 104,
+              "stack": [
+                "sync.(*WaitGroup).Wait",
+                "github.com/cockroachdb/pebble.(*commitPipeline).publish",
+                "github.com/cockroachdb/pebble.(*commitPipeline).Commit",
+                "github.com/cockroachdb/pebble.(*DB).applyInternal",
+                "github.com/cockroachdb/pebble.(*DB).Apply",
+                "github.com/cockroachdb/pebble.(*Batch).Commit",
+                "github.com/cockroachdb/cockroach/pkg/storage.(*writeBatch).Commit",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaAppBatch).ApplyToStateMachine",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).applyOneBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).ApplyCommittedEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*WaitGroup).Wait"
+            }
+          ],
+          "heavy_unblockers": [
+            {
+              "g": 1222,
+              "count": 313,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).HandleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).handleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1.1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1"
+              ]
+            },
+            {
+              "g": 918,
+              "count": 147,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            },
+            {
+              "g": 916,
+              "count": 131,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "index": 6,
+        "type": "runnable",
+        "start_ms": 1800,
+        "max_runnable": 190,
+        "burst_breakdown": {
+          "categories": [
+            {
+              "name": "unblocked",
+              "count": 933
+            },
+            {
+              "name": "new",
+              "count": 31
+            },
+            {
+              "name": "preempted",
+              "count": 2
+            }
+          ],
+          "creators": [
+            {
+              "count": 28,
+              "stack": [
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).Async",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).MaybeAddAsync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaAppBatch).ApplyToStateMachine",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).applyOneBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).ApplyCommittedEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ]
+            },
+            {
+              "count": 3,
+              "stack": [
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).Async",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*baseQueue).MaybeAddAsync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaAppBatch).ApplyToStateMachine",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).applyOneBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/apply.(*Task).ApplyCommittedEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ]
+            }
+          ],
+          "unblockers": [
+            {
+              "count": 288,
+              "func": "(*WaitGroup).Add"
+            },
+            {
+              "count": 257,
+              "func": "(*Cond).Signal"
+            },
+            {
+              "count": 208,
+              "func": "selectgo"
+            }
+          ],
+          "blocked_at": [
+            {
+              "count": 257,
+              "stack": [
+                "sync.(*Cond).Wait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*Cond).Wait"
+            },
+            {
+              "count": 222,
+              "stack": [
+                "sync.(*WaitGroup).Wait",
+                "github.com/cockroachdb/pebble.(*commitPipeline).publish",
+                "github.com/cockroachdb/pebble.(*commitPipeline).Commit",
+                "github.com/cockroachdb/pebble.(*DB).applyInternal",
+                "github.com/cockroachdb/pebble.(*DB).ApplyNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/storage.(*writeBatch).CommitNoSyncWait",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).storeEntriesAndCommitBatch",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*LogStore).StoreEntries",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaLogStorage).appendRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReadyRaftMuLocked",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).handleRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).processReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).worker",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2"
+              ],
+              "leaf_bracket": "(*WaitGroup).Wait"
+            },
+            {
+              "count": 208,
+              "stack": [
+                "runtime.selectgo",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*pooledStream[...]).runOnce",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*pooledStream[...]).run",
+                "github.com/cockroachdb/cockroach/pkg/rpc.(*streamPool[...]).newPooledStream.func2"
+              ],
+              "leaf_bracket": "selectgo"
+            }
+          ],
+          "heavy_unblockers": [
+            {
+              "g": 1222,
+              "count": 116,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).HandleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).handleRaftRequest",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1.1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1"
+              ]
+            },
+            {
+              "g": 916,
+              "count": 50,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            },
+            {
+              "g": 917,
+              "count": 34,
+              "stack": [
+                "sync.(*Cond).Signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftSchedulerShard).signal",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).enqueue1",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).EnqueueRaftReady",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Store).enqueueRaftUpdateCheck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*Replica).sendStorageAck",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*replicaSyncCallback).OnLogSync",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*nonBlockingSyncWaiterCallback).run",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).waitLoop",
+                "github.com/cockroachdb/cockroach/pkg/kv/kvserver/logstore.(*SyncWaiterLoop).Start.func1",
+                "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "gc": {
+    "cycle_summary": {
+      "count": 1,
+      "total_ns": 30313984,
+      "avg_ns": 30313984,
+      "min_ns": 30313984,
+      "max_ns": 30313984
+    },
+    "stw": {
+      "total_count": 3,
+      "total_ns": 270272,
+      "max_ns": 140352,
+      "reasons": [
+        {
+          "reason": "GC sweep termination",
+          "count": 1,
+          "total_ns": 140352,
+          "max_ns": 140352
+        },
+        {
+          "reason": "GC mark termination",
+          "count": 1,
+          "total_ns": 125696,
+          "max_ns": 125696
+        },
+        {
+          "reason": "start trace",
+          "count": 1,
+          "total_ns": 4224,
+          "max_ns": 4224
+        }
+      ]
+    },
+    "mark_assist": {
+      "total_events": 963,
+      "total_goroutines": 836,
+      "total_ns": 93391242,
+      "max_single_ns": 1255872,
+      "top_goroutines": [
+        {
+          "g": 1222,
+          "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1",
+          "assists": 95,
+          "total_ns": 11638848,
+          "max_ns": 1255872,
+          "worst_at_ms": 4266.09536
+        },
+        {
+          "g": 1012,
+          "name": "google.golang.org/grpc/internal/transport.(*http2Client).reader",
+          "assists": 7,
+          "total_ns": 1048768,
+          "max_ns": 313664,
+          "worst_at_ms": 4255.092992
+        },
+        {
+          "g": 1285,
+          "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).startProcessNewQueue.func3",
+          "assists": 7,
+          "total_ns": 715198,
+          "max_ns": 139840,
+          "worst_at_ms": 4251.602048
+        },
+        {
+          "g": 916,
+          "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
+          "assists": 4,
+          "total_ns": 594176,
+          "max_ns": 296704,
+          "worst_at_ms": 4249.792192
+        },
+        {
+          "g": 919,
+          "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
+          "assists": 4,
+          "total_ns": 566528,
+          "max_ns": 210688,
+          "worst_at_ms": 4249.729728
+        }
+      ]
+    },
+    "latency_comparison": {
+      "during_gc": {
+        "count": 4969,
+        "p50_ns": 74560,
+        "p99_ns": 7513935,
+        "max_ns": 9440000
+      },
+      "non_gc": {
+        "count": 1549443,
+        "p50_ns": 21312,
+        "p99_ns": 502592,
+        "max_ns": 2404224
+      },
+      "ratio_p50": 3.498498,
+      "ratio_p99": 14.950368,
+      "ratio_max": 3.926423
+    },
+    "sweep": {
+      "count": 376,
+      "total_ns": 304941
+    }
+  }
+}
