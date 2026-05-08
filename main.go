@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -51,13 +53,61 @@ Examples:
 			if opts.json && opts.sql {
 				return fmt.Errorf("--json and --sql are mutually exclusive")
 			}
-			exitCode := 0
+			// --sql calls syscall.Exec at the end (process replacement), which
+			// is incompatible with the parallel/buffered path. Single-file
+			// usage stays sequential and direct; multi-file is rejected.
+			if opts.sql {
+				if len(args) > 1 {
+					return fmt.Errorf("--sql can only be used with a single trace file")
+				}
+				return runOne(os.Stdout, args[0])
+			}
+
+			concurrency := runtime.GOMAXPROCS(0) / 4
+			if concurrency < 1 {
+				concurrency = 1
+			}
+			if concurrency > len(args) {
+				concurrency = len(args)
+			}
+
+			// Each file gets a result slot with its own done channel. Workers
+			// run up to `concurrency` at a time and close their slot's
+			// channel when finished. The emitter walks slots in input order,
+			// blocking on the next one — so output is deterministic and
+			// streams as soon as the next-in-line file is ready.
+			type result struct {
+				stdout []byte
+				err    error
+				done   chan struct{}
+			}
+			results := make([]result, len(args))
+			for i := range results {
+				results[i].done = make(chan struct{})
+			}
+			sem := make(chan struct{}, concurrency)
 			for i, traceFile := range args {
+				sem <- struct{}{}
+				go func(i int, traceFile string) {
+					defer close(results[i].done)
+					defer func() { <-sem }()
+					var buf bytes.Buffer
+					results[i].err = runOne(&buf, traceFile)
+					results[i].stdout = buf.Bytes()
+				}(i, traceFile)
+			}
+
+			exitCode := 0
+			for i := range args {
+				<-results[i].done
 				if i > 0 && !opts.json {
 					fmt.Println()
 				}
-				if err := run(traceFile); err != nil {
-					fmt.Fprintf(os.Stderr, "error processing %s: %v\n", traceFile, err)
+				if len(results[i].stdout) > 0 {
+					os.Stdout.Write(results[i].stdout)
+				}
+				if results[i].err != nil {
+					fmt.Fprintf(os.Stderr, "error processing %s: %v\n", args[i], results[i].err)
 					exitCode = 1
 				}
 			}
@@ -89,7 +139,10 @@ Examples:
 	}
 }
 
-func run(traceFile string) error {
+// runOne processes a single trace file and writes all output (text or JSON) to
+// w. With --sql it transfers control to the DuckDB shell via syscall.Exec at
+// the end; in that case w is expected to be os.Stdout.
+func runOne(w io.Writer, traceFile string) error {
 	dbFile := traceFile + ".duckdb"
 	needsCleanup := !opts.keepDB && !opts.sql
 	if needsCleanup {
@@ -118,12 +171,12 @@ func run(traceFile string) error {
 
 	database := db.DB
 
-	var w io.Writer = os.Stdout
+	var analyzeW io.Writer = w
 	if opts.json {
 		// Suppress streaming text; the report is encoded as JSON below.
-		w = io.Discard
+		analyzeW = io.Discard
 	}
-	report, err := analyze(database, traceFile, w)
+	report, err := analyze(database, traceFile, analyzeW)
 	if err != nil {
 		database.Close()
 		return err
@@ -132,7 +185,7 @@ func run(traceFile string) error {
 
 	if opts.json {
 		// json.Encoder.Encode appends '\n', producing NDJSON across traces.
-		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+		if err := json.NewEncoder(w).Encode(report); err != nil {
 			return err
 		}
 		if opts.keepDB {
@@ -143,16 +196,16 @@ func run(traceFile string) error {
 	}
 
 	if opts.keepDB {
-		fmt.Printf("\n%s\n", strings.Repeat("=", 60))
-		fmt.Printf("DuckDB file: %s\n", dbFile)
-		printSchemaInfo()
+		fmt.Fprintf(w, "\n%s\n", strings.Repeat("=", 60))
+		fmt.Fprintf(w, "DuckDB file: %s\n", dbFile)
+		fmt.Fprint(w, schemaInfo())
 	}
 
 	if opts.sql {
-		fmt.Printf("\n%s\n", strings.Repeat("=", 60))
-		fmt.Println("Dropping into DuckDB shell...")
-		printSchemaInfo()
-		fmt.Println()
+		fmt.Fprintf(w, "\n%s\n", strings.Repeat("=", 60))
+		fmt.Fprintln(w, "Dropping into DuckDB shell...")
+		fmt.Fprint(w, schemaInfo())
+		fmt.Fprintln(w)
 		return execDuckDB(dbFile)
 	}
 
@@ -1561,8 +1614,8 @@ func collectTopGoroutines(db *sql.DB) (*TopGoroutinesReport, error) {
 	return out, rows.Err()
 }
 
-func printSchemaInfo() {
-	fmt.Println(`
+func schemaInfo() string {
+	return `
 Key tables in the DuckDB:
   g_transitions  - Goroutine state changes (the main table for scheduling analysis)
                    Columns: g, from_state, to_state, reason, duration_ns, end_time_ns,
@@ -1577,7 +1630,8 @@ Useful patterns:
   stack_funcs(stack_id) returns the function names in a stack
   list_first(stack_funcs(id)) gets the top function (leaf)
 
-Example: SELECT * FROM goroutines ORDER BY runnable_ns DESC LIMIT 10;`)
+Example: SELECT * FROM goroutines ORDER BY runnable_ns DESC LIMIT 10;
+`
 }
 
 func execDuckDB(dbFile string) error {
