@@ -3,6 +3,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -31,6 +32,7 @@ var opts struct {
 	keepDB             bool
 	sql                bool
 	verbose            bool
+	json               bool
 }
 
 func main() {
@@ -46,9 +48,12 @@ Examples:
   schedstat --sql trace.out          # Drop into DuckDB shell for custom queries`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if opts.json && opts.sql {
+				return fmt.Errorf("--json and --sql are mutually exclusive")
+			}
 			exitCode := 0
 			for i, traceFile := range args {
-				if i > 0 {
+				if i > 0 && !opts.json {
 					fmt.Println()
 				}
 				if err := run(traceFile); err != nil {
@@ -77,6 +82,7 @@ Examples:
 	f.BoolVar(&opts.keepDB, "keep-db", false, "keep DuckDB file after analysis")
 	f.BoolVar(&opts.sql, "sql", false, "drop into DuckDB shell after analysis")
 	f.BoolVarP(&opts.verbose, "verbose", "v", false, "verbose output")
+	f.BoolVar(&opts.json, "json", false, "emit JSON (NDJSON for multiple traces) instead of plaintext")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -112,11 +118,29 @@ func run(traceFile string) error {
 
 	database := db.DB
 
-	if _, err := analyze(database, traceFile, os.Stdout); err != nil {
+	var w io.Writer = os.Stdout
+	if opts.json {
+		// Suppress streaming text; the report is encoded as JSON below.
+		w = io.Discard
+	}
+	report, err := analyze(database, traceFile, w)
+	if err != nil {
 		database.Close()
 		return err
 	}
 	database.Close()
+
+	if opts.json {
+		// json.Encoder.Encode appends '\n', producing NDJSON across traces.
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			return err
+		}
+		if opts.keepDB {
+			// Footer goes to stderr so stdout stays valid NDJSON.
+			fmt.Fprintf(os.Stderr, "DuckDB file: %s\n", dbFile)
+		}
+		return nil
+	}
 
 	if opts.keepDB {
 		fmt.Printf("\n%s\n", strings.Repeat("=", 60))
@@ -135,27 +159,35 @@ func run(traceFile string) error {
 	return nil
 }
 
-// runAnalysis is the internal entry point for running schedstat on a trace file,
-// writing output to w. Tests use this to capture output without compiling and
-// executing the binary.
-func runAnalysis(traceFile string, w io.Writer) error {
+// analyzeFile is the internal entry point for running schedstat on a trace
+// file. It loads the trace into a temporary DuckDB, runs analyze, streams the
+// plaintext form to w, and returns the populated Report. Tests use this to
+// capture output (and the structured Report for JSON comparisons) without
+// compiling and executing the binary.
+func analyzeFile(traceFile string, w io.Writer) (*Report, error) {
 	dbFile := traceFile + ".duckdb"
 	defer os.Remove(dbFile)
 	_ = os.Remove(dbFile)
 
 	traceData, err := os.Open(traceFile)
 	if err != nil {
-		return fmt.Errorf("opening trace file: %w", err)
+		return nil, fmt.Errorf("opening trace file: %w", err)
 	}
 
 	db, err := tracedb.Create(dbFile, traceData)
 	traceData.Close()
 	if err != nil {
-		return fmt.Errorf("loading trace: %w", err)
+		return nil, fmt.Errorf("loading trace: %w", err)
 	}
 	defer db.DB.Close()
 
-	_, err = analyze(db.DB, traceFile, w)
+	return analyze(db.DB, traceFile, w)
+}
+
+// runAnalysis is a back-compatible wrapper around analyzeFile that discards
+// the Report.
+func runAnalysis(traceFile string, w io.Writer) error {
+	_, err := analyzeFile(traceFile, w)
 	return err
 }
 
