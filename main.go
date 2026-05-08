@@ -86,16 +86,23 @@ Examples:
 				results[i].done = make(chan struct{})
 			}
 			sem := make(chan struct{}, concurrency)
-			for i, traceFile := range args {
-				sem <- struct{}{}
-				go func(i int, traceFile string) {
-					defer close(results[i].done)
-					defer func() { <-sem }()
-					var buf bytes.Buffer
-					results[i].err = runOne(&buf, traceFile)
-					results[i].stdout = buf.Bytes()
-				}(i, traceFile)
-			}
+			// Dispatch in its own goroutine so the emitter loop below can
+			// start writing as soon as file 0 finishes — without it, the
+			// dispatcher's `sem <-` would block the main goroutine until
+			// every worker had launched, which for long file lists means
+			// the emitter never gets to run until near the end.
+			go func() {
+				for i, traceFile := range args {
+					sem <- struct{}{}
+					go func(i int, traceFile string) {
+						defer close(results[i].done)
+						defer func() { <-sem }()
+						var buf bytes.Buffer
+						results[i].err = runOne(&buf, traceFile)
+						results[i].stdout = buf.Bytes()
+					}(i, traceFile)
+				}
+			}()
 
 			exitCode := 0
 			for i := range args {
