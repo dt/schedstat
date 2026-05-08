@@ -1096,54 +1096,6 @@
         }
       ]
     },
-    "mark_assist": {
-      "total_events": 963,
-      "total_goroutines": 836,
-      "total_ns": 93391242,
-      "max_single_ns": 1255872,
-      "top_goroutines": [
-        {
-          "g": 1222,
-          "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1",
-          "assists": 95,
-          "total_ns": 11638848,
-          "max_ns": 1255872,
-          "worst_at_ms": 4266.09536
-        },
-        {
-          "g": 1012,
-          "name": "google.golang.org/grpc/internal/transport.(*http2Client).reader",
-          "assists": 7,
-          "total_ns": 1048768,
-          "max_ns": 313664,
-          "worst_at_ms": 4255.092992
-        },
-        {
-          "g": 1285,
-          "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).startProcessNewQueue.func3",
-          "assists": 7,
-          "total_ns": 715198,
-          "max_ns": 139840,
-          "worst_at_ms": 4251.602048
-        },
-        {
-          "g": 916,
-          "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
-          "assists": 4,
-          "total_ns": 594176,
-          "max_ns": 296704,
-          "worst_at_ms": 4249.792192
-        },
-        {
-          "g": 919,
-          "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
-          "assists": 4,
-          "total_ns": 566528,
-          "max_ns": 210688,
-          "worst_at_ms": 4249.729728
-        }
-      ]
-    },
     "latency_comparison": {
       "during_gc": {
         "count": 4969,
@@ -1164,6 +1116,60 @@
     "sweep": {
       "count": 376,
       "total_ns": 304941
+    },
+    "per_cycle": {
+      "cycles": [
+        {
+          "cycle": 1,
+          "start_ms": 4249.358144,
+          "duration_ns": 30313984,
+          "assist_events": 963,
+          "assist_goroutines": 836,
+          "assist_total_ns": 93391242,
+          "top_goroutines": [
+            {
+              "g": 1222,
+              "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1",
+              "assists": 95,
+              "total_ns": 11638848,
+              "max_ns": 1255872,
+              "worst_at_ms": 4266.09536
+            },
+            {
+              "g": 1012,
+              "name": "google.golang.org/grpc/internal/transport.(*http2Client).reader",
+              "assists": 7,
+              "total_ns": 1048768,
+              "max_ns": 313664,
+              "worst_at_ms": 4255.092992
+            },
+            {
+              "g": 1285,
+              "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).startProcessNewQueue.func3",
+              "assists": 7,
+              "total_ns": 715198,
+              "max_ns": 139840,
+              "worst_at_ms": 4251.602048
+            },
+            {
+              "g": 916,
+              "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
+              "assists": 4,
+              "total_ns": 594176,
+              "max_ns": 296704,
+              "worst_at_ms": 4249.792192
+            },
+            {
+              "g": 919,
+              "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
+              "assists": 4,
+              "total_ns": 566528,
+              "max_ns": 210688,
+              "worst_at_ms": 4249.729728
+            }
+          ]
+        }
+      ]
     }
   }
 }

@@ -1893,54 +1893,6 @@
         }
       ]
     },
-    "mark_assist": {
-      "total_events": 1039,
-      "total_goroutines": 698,
-      "total_ns": 97127500,
-      "max_single_ns": 1746624,
-      "top_goroutines": [
-        {
-          "g": 1046,
-          "name": "github.com/cockroachdb/cockroach/pkg/ts.(*poller).start.func1",
-          "assists": 97,
-          "total_ns": 9179136,
-          "max_ns": 1746624,
-          "worst_at_ms": 9934.948672
-        },
-        {
-          "g": 2504794,
-          "name": "github.com/cockroachdb/pebble.(*DB).flush",
-          "assists": 20,
-          "total_ns": 5544769,
-          "max_ns": 1674240,
-          "worst_at_ms": 9943.552
-        },
-        {
-          "g": 1055,
-          "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
-          "assists": 46,
-          "total_ns": 3530304,
-          "max_ns": 181376,
-          "worst_at_ms": 9923.295296
-        },
-        {
-          "g": 718,
-          "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
-          "assists": 40,
-          "total_ns": 3501696,
-          "max_ns": 354880,
-          "worst_at_ms": 9937.5904
-        },
-        {
-          "g": 720,
-          "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
-          "assists": 38,
-          "total_ns": 2805697,
-          "max_ns": 149760,
-          "worst_at_ms": 9927.487424
-        }
-      ]
-    },
     "latency_comparison": {
       "during_gc": {
         "count": 9730,
@@ -1961,6 +1913,110 @@
     "sweep": {
       "count": 3809,
       "total_ns": 2903876
+    },
+    "per_cycle": {
+      "cycles": [
+        {
+          "cycle": 1,
+          "start_ms": 2633.9792,
+          "duration_ns": 31405440,
+          "assist_events": 26,
+          "assist_goroutines": 20,
+          "assist_total_ns": 2786497,
+          "top_goroutines": [
+            {
+              "g": 4027,
+              "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1",
+              "assists": 5,
+              "total_ns": 490560,
+              "max_ns": 127872,
+              "worst_at_ms": 2644.622208
+            },
+            {
+              "g": 3947,
+              "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*RaftTransport).raftMessageBatch.func1",
+              "assists": 3,
+              "total_ns": 439040,
+              "max_ns": 157888,
+              "worst_at_ms": 2644.753984
+            },
+            {
+              "g": 951,
+              "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2",
+              "assists": 1,
+              "total_ns": 178496,
+              "max_ns": 178496,
+              "worst_at_ms": 2634.46304
+            },
+            {
+              "g": 883,
+              "name": "github.com/cockroachdb/cockroach/pkg/kv/kvserver.(*raftScheduler).Start.func2",
+              "assists": 1,
+              "total_ns": 165185,
+              "max_ns": 165185,
+              "worst_at_ms": 2644.631296
+            },
+            {
+              "g": 4378,
+              "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
+              "assists": 1,
+              "total_ns": 156992,
+              "max_ns": 156992,
+              "worst_at_ms": 2644.624448
+            }
+          ]
+        },
+        {
+          "cycle": 2,
+          "start_ms": 9922.0496,
+          "duration_ns": 57142400,
+          "assist_events": 1013,
+          "assist_goroutines": 693,
+          "assist_total_ns": 94341003,
+          "top_goroutines": [
+            {
+              "g": 1046,
+              "name": "github.com/cockroachdb/cockroach/pkg/ts.(*poller).start.func1",
+              "assists": 97,
+              "total_ns": 9179136,
+              "max_ns": 1746624,
+              "worst_at_ms": 9934.948672
+            },
+            {
+              "g": 2504794,
+              "name": "github.com/cockroachdb/pebble.(*DB).flush",
+              "assists": 20,
+              "total_ns": 5544769,
+              "max_ns": 1674240,
+              "worst_at_ms": 9943.552
+            },
+            {
+              "g": 1055,
+              "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
+              "assists": 46,
+              "total_ns": 3530304,
+              "max_ns": 181376,
+              "worst_at_ms": 9923.295296
+            },
+            {
+              "g": 718,
+              "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
+              "assists": 40,
+              "total_ns": 3501696,
+              "max_ns": 354880,
+              "worst_at_ms": 9937.5904
+            },
+            {
+              "g": 720,
+              "name": "github.com/cockroachdb/cockroach/pkg/util/stop.(*Stopper).RunAsyncTaskEx.func1",
+              "assists": 38,
+              "total_ns": 2805697,
+              "max_ns": 149760,
+              "worst_at_ms": 9927.487424
+            }
+          ]
+        }
+      ]
     }
   }
 }

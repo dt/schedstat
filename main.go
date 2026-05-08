@@ -651,14 +651,6 @@ func collectGCAnalysis(db *sql.DB) (*GCReport, error) {
 		g.STW = stw
 	}
 
-	ma, err := collectMarkAssist(db)
-	if err != nil {
-		return nil, err
-	}
-	if ma != nil {
-		g.MarkAssist = ma
-	}
-
 	cmp, err := collectGCLatencyComparison(db)
 	if err != nil {
 		return nil, err
@@ -667,20 +659,20 @@ func collectGCAnalysis(db *sql.DB) (*GCReport, error) {
 		g.LatencyComparison = cmp
 	}
 
-	if opts.verbose {
-		pc, err := collectPerCycleBreakdown(db)
-		if err != nil {
-			return nil, err
-		}
-		g.PerCycle = pc
-	}
-
 	sweep, err := collectSweepSummary(db)
 	if err != nil {
 		return nil, err
 	}
 	if sweep != nil {
 		g.Sweep = sweep
+	}
+
+	pc, err := collectPerCycleGCDetail(db)
+	if err != nil {
+		return nil, err
+	}
+	if pc != nil {
+		g.PerCycle = pc
 	}
 
 	return g, nil
@@ -753,66 +745,6 @@ func collectSTWSummary(db *sql.DB) (*GCSTWSummary, error) {
 		MaxNs:      int64(overallMax),
 		Reasons:    reasons,
 	}, nil
-}
-
-func collectMarkAssist(db *sql.DB) (*GCMarkAssist, error) {
-	var totalEvents int
-	var totalGoroutines int
-	var totalNs, maxSingleNs sql.NullFloat64
-	err := db.QueryRow(`
-		SELECT COUNT(*), COUNT(DISTINCT scope_id), SUM(duration_ns), MAX(duration_ns)
-		FROM gc_ranges
-		WHERE name = 'GC mark assist'
-	`).Scan(&totalEvents, &totalGoroutines, &totalNs, &maxSingleNs)
-	if err != nil {
-		return nil, fmt.Errorf("mark assist summary: %w", err)
-	}
-	if totalEvents == 0 {
-		return nil, nil
-	}
-
-	out := &GCMarkAssist{
-		TotalEvents:     totalEvents,
-		TotalGoroutines: totalGoroutines,
-		TotalNs:         nullF64ToInt64Ptr(totalNs),
-		MaxSingleNs:     nullF64ToInt64Ptr(maxSingleNs),
-	}
-
-	rows, err := db.Query(`
-		WITH t0 AS (
-			SELECT MIN(end_time_ns - duration_ns) as v FROM g_transitions
-			WHERE from_state = 'runnable' AND to_state = 'running'
-		)
-		SELECT
-			r.scope_id,
-			COALESCE(g.name, '(unknown)') as gname,
-			COUNT(*) as assists,
-			SUM(r.duration_ns) as total_assist_ns,
-			MAX(r.duration_ns) as max_assist_ns,
-			(arg_max(r.start_time_ns, r.duration_ns) - (SELECT v FROM t0)) / 1e6 as worst_at_ms
-		FROM gc_ranges r
-		LEFT JOIN goroutines g ON r.scope_id = g.g
-		WHERE r.name = 'GC mark assist'
-		GROUP BY r.scope_id, gname
-		ORDER BY total_assist_ns DESC
-		LIMIT $1
-	`, opts.top)
-	if err != nil {
-		return nil, fmt.Errorf("mark assist top goroutines: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var e MarkAssistGEntry
-		var totNs, mxNs float64
-		if err := rows.Scan(&e.G, &e.Name, &e.Assists, &totNs, &mxNs, &e.WorstAtMs); err != nil {
-			return nil, err
-		}
-		e.TotalNs = int64(totNs)
-		e.MaxNs = int64(mxNs)
-		out.TopGoroutines = append(out.TopGoroutines, e)
-	}
-	return out, rows.Err()
 }
 
 func collectGCLatencyComparison(db *sql.DB) (*GCLatencyComparison, error) {
@@ -900,10 +832,26 @@ func collectGCLatencyComparison(db *sql.DB) (*GCLatencyComparison, error) {
 	return out, nil
 }
 
-func collectPerCycleBreakdown(db *sql.DB) (*GCPerCycleBreakdown, error) {
-	rows, err := db.Query(`
+// collectPerCycleGCDetail returns one entry per GC cycle with that cycle's
+// mark-assist totals and the top-N affected goroutines. Returns nil if the
+// trace contains no GC cycles.
+func collectPerCycleGCDetail(db *sql.DB) (*GCPerCycleDetail, error) {
+	var cycleCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM gc_cycles`).Scan(&cycleCount); err != nil {
+		return nil, fmt.Errorf("gc cycle count: %w", err)
+	}
+	if cycleCount == 0 {
+		return nil, nil
+	}
+
+	cycleRows, err := db.Query(`
+		WITH t0 AS (
+			SELECT MIN(end_time_ns - duration_ns) as v FROM g_transitions
+			WHERE from_state = 'runnable' AND to_state = 'running'
+		)
 		SELECT
 			gc.cycle,
+			(gc.start_time_ns - (SELECT v FROM t0)) / 1e6 as start_ms,
 			gc.duration_ns,
 			COUNT(r.name) as assists,
 			COUNT(DISTINCT r.scope_id) as goroutines,
@@ -913,26 +861,81 @@ func collectPerCycleBreakdown(db *sql.DB) (*GCPerCycleBreakdown, error) {
 			ON r.name = 'GC mark assist'
 			AND r.start_time_ns < gc.end_time_ns
 			AND r.end_time_ns > gc.start_time_ns
-		GROUP BY gc.cycle, gc.duration_ns, gc.start_time_ns
+		GROUP BY gc.cycle, gc.start_time_ns, gc.duration_ns
 		ORDER BY gc.start_time_ns
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("per-cycle breakdown: %w", err)
+		return nil, fmt.Errorf("per-cycle detail: %w", err)
 	}
-	defer rows.Close()
+	defer cycleRows.Close()
 
-	out := &GCPerCycleBreakdown{}
-	for rows.Next() {
-		var e GCCycleEntry
+	out := &GCPerCycleDetail{}
+	cycleIdx := map[int]int{} // cycle number → index in out.Cycles
+	for cycleRows.Next() {
+		var c GCCycleDetail
 		var dur, assist float64
-		if err := rows.Scan(&e.Cycle, &dur, &e.Assists, &e.Goroutines, &assist); err != nil {
+		if err := cycleRows.Scan(&c.Cycle, &c.StartMs, &dur, &c.AssistEvents, &c.AssistGoroutines, &assist); err != nil {
 			return nil, err
 		}
-		e.DurationNs = int64(dur)
-		e.AssistTimeNs = int64(assist)
-		out.Cycles = append(out.Cycles, e)
+		c.DurationNs = int64(dur)
+		c.AssistTotalNs = int64(assist)
+		cycleIdx[c.Cycle] = len(out.Cycles)
+		out.Cycles = append(out.Cycles, c)
 	}
-	return out, rows.Err()
+	if err := cycleRows.Err(); err != nil {
+		return nil, err
+	}
+
+	gRows, err := db.Query(`
+		WITH t0 AS (
+			SELECT MIN(end_time_ns - duration_ns) as v FROM g_transitions
+			WHERE from_state = 'runnable' AND to_state = 'running'
+		),
+		per_g AS (
+			SELECT
+				gc.cycle,
+				r.scope_id,
+				COALESCE(g.name, '(unknown)') as gname,
+				COUNT(*) as assists,
+				SUM(r.duration_ns) as total_assist_ns,
+				MAX(r.duration_ns) as max_assist_ns,
+				(arg_max(r.start_time_ns, r.duration_ns) - (SELECT v FROM t0)) / 1e6 as worst_at_ms
+			FROM gc_cycles gc
+			JOIN gc_ranges r
+				ON r.name = 'GC mark assist'
+				AND r.start_time_ns < gc.end_time_ns
+				AND r.end_time_ns > gc.start_time_ns
+			LEFT JOIN goroutines g ON r.scope_id = g.g
+			GROUP BY gc.cycle, r.scope_id, gname
+		),
+		ranked AS (
+			SELECT *, ROW_NUMBER() OVER (PARTITION BY cycle ORDER BY total_assist_ns DESC) as rn
+			FROM per_g
+		)
+		SELECT cycle, scope_id, gname, assists, total_assist_ns, max_assist_ns, worst_at_ms
+		FROM ranked
+		WHERE rn <= $1
+		ORDER BY cycle, total_assist_ns DESC
+	`, opts.top)
+	if err != nil {
+		return nil, fmt.Errorf("per-cycle goroutines: %w", err)
+	}
+	defer gRows.Close()
+
+	for gRows.Next() {
+		var cycle int
+		var e CycleAssistG
+		var totNs, mxNs float64
+		if err := gRows.Scan(&cycle, &e.G, &e.Name, &e.Assists, &totNs, &mxNs, &e.WorstAtMs); err != nil {
+			return nil, err
+		}
+		e.TotalNs = int64(totNs)
+		e.MaxNs = int64(mxNs)
+		if i, ok := cycleIdx[cycle]; ok {
+			out.Cycles[i].TopGoroutines = append(out.Cycles[i].TopGoroutines, e)
+		}
+	}
+	return out, gRows.Err()
 }
 
 func collectSweepSummary(db *sql.DB) (*GCSweepSummary, error) {

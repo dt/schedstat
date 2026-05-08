@@ -190,16 +190,25 @@ GC cycles: 2, total: 88.55ms, avg: 44.27ms, min: 31.41ms, max: 57.14ms
     GC sweep termination: 2 pauses, total 659.3µs, max 429.4µs
     GC mark termination: 2 pauses, total 213.7µs, max 125.4µs
     start trace: 1 pauses, total 49.0µs, max 49.0µs
-  Mark assist: 1039 events across 698 goroutines, total: 97.13ms, max single: 1.75ms
-    Top affected goroutines:
-      g1046     pkg/ts.(*poller).start.func1             97 assists, total 9.18ms, max 1.75ms @ t=9935ms
-      g2504794  cockroachdb/pebble.(*DB).flush           20 assists, total 5.54ms, max 1.67ms @ t=9944ms
-      g1055     util/stop.(*Stopper).RunAsyncTaskEx.func1 46 assists, total 3.53ms, max 181.4µs @ t=9923ms
-      g718      util/stop.(*Stopper).RunAsyncTaskEx.func1 40 assists, total 3.50ms, max 354.9µs @ t=9938ms
-      g720      util/stop.(*Stopper).RunAsyncTaskEx.func1 38 assists, total 2.81ms, max 149.8µs @ t=9927ms
   Scheduling latency during GC vs normal:
                    count      p50        p99        max       
     During GC:     9730       79.7µs     16.28ms    21.76ms   
     Non-GC:        1548091    41.3µs     3.16ms     7.58ms    
     Ratio:                    1.9x       5.2x       2.9x      
   Sweep: 3809 events, total: 2.90ms
+
+  Cycle 1 @ t=2634ms, duration: 31.41ms
+    Mark assist: 26 events, 20 goroutines, total: 2.79ms
+      g4027     kv/kvserver.(*RaftTransport).raftMessageBatch.func1 5 assists, total 490.6µs, max 127.9µs @ t=2645ms
+      g3947     kv/kvserver.(*RaftTransport).raftMessageBatch.func1 3 assists, total 439.0µs, max 157.9µs @ t=2645ms
+      g951      kv/kvserver.(*raftScheduler).Start.func2 1 assists, total 178.5µs, max 178.5µs @ t=2634ms
+      g883      kv/kvserver.(*raftScheduler).Start.func2 1 assists, total 165.2µs, max 165.2µs @ t=2645ms
+      g4378     util/stop.(*Stopper).RunAsyncTaskEx.func1 1 assists, total 157.0µs, max 157.0µs @ t=2645ms
+
+  Cycle 2 @ t=9922ms, duration: 57.14ms
+    Mark assist: 1013 events, 693 goroutines, total: 94.34ms
+      g1046     pkg/ts.(*poller).start.func1             97 assists, total 9.18ms, max 1.75ms @ t=9935ms
+      g2504794  cockroachdb/pebble.(*DB).flush           20 assists, total 5.54ms, max 1.67ms @ t=9944ms
+      g1055     util/stop.(*Stopper).RunAsyncTaskEx.func1 46 assists, total 3.53ms, max 181.4µs @ t=9923ms
+      g718      util/stop.(*Stopper).RunAsyncTaskEx.func1 40 assists, total 3.50ms, max 354.9µs @ t=9938ms
+      g720      util/stop.(*Stopper).RunAsyncTaskEx.func1 38 assists, total 2.81ms, max 149.8µs @ t=9927ms
