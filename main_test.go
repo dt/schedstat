@@ -31,6 +31,7 @@ func testOpts() struct {
 	sql                bool
 	verbose            bool
 	json               bool
+	concurrency        int
 } {
 	return struct {
 		window             time.Duration
@@ -47,6 +48,7 @@ func testOpts() struct {
 		sql                bool
 		verbose            bool
 		json               bool
+		concurrency        int
 	}{
 		window:             100 * time.Millisecond,
 		spikeThreshold:     1 * time.Millisecond,

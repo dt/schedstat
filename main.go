@@ -35,6 +35,7 @@ var opts struct {
 	sql                bool
 	verbose            bool
 	json               bool
+	concurrency        int
 }
 
 func main() {
@@ -63,9 +64,9 @@ Examples:
 				return runOne(os.Stdout, args[0])
 			}
 
-			concurrency := runtime.GOMAXPROCS(0) / 4
-			if concurrency < 1 {
-				concurrency = 1
+			concurrency := opts.concurrency
+			if concurrency <= 0 {
+				concurrency = runtime.GOMAXPROCS(0)
 			}
 			if concurrency > len(args) {
 				concurrency = len(args)
@@ -140,6 +141,7 @@ Examples:
 	f.BoolVar(&opts.sql, "sql", false, "drop into DuckDB shell after analysis")
 	f.BoolVarP(&opts.verbose, "verbose", "v", false, "verbose output")
 	f.BoolVar(&opts.json, "json", false, "emit JSON (NDJSON for multiple traces) instead of plaintext")
+	f.IntVar(&opts.concurrency, "concurrency", 0, "number of trace files to process in parallel (0 = GOMAXPROCS)")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

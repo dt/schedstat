@@ -104,6 +104,7 @@ The default output includes:
 | `--keep-db` | `false` | Keep DuckDB file after analysis |
 | `--sql` | `false` | Drop into DuckDB shell after analysis |
 | `--json` | `false` | Emit JSON (NDJSON for multiple traces) instead of plaintext |
+| `--concurrency` | `0` | Number of trace files to process in parallel (0 = GOMAXPROCS) |
 | `-v`, `--verbose` | `false` | Verbose output |
 
 ## Collecting a trace
