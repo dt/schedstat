@@ -43,54 +43,6 @@
         }
       ]
     },
-    "mark_assist": {
-      "total_events": 72,
-      "total_goroutines": 30,
-      "total_ns": 33431232,
-      "max_single_ns": 3481024,
-      "top_goroutines": [
-        {
-          "g": 1068065,
-          "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
-          "assists": 4,
-          "total_ns": 4716160,
-          "max_ns": 3251776,
-          "worst_at_ms": 73.187904
-        },
-        {
-          "g": 1067930,
-          "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
-          "assists": 3,
-          "total_ns": 4379840,
-          "max_ns": 3481024,
-          "worst_at_ms": 71.874944
-        },
-        {
-          "g": 1068084,
-          "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
-          "assists": 5,
-          "total_ns": 3777216,
-          "max_ns": 3243776,
-          "worst_at_ms": 72.88928
-        },
-        {
-          "g": 1058917,
-          "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
-          "assists": 6,
-          "total_ns": 3502784,
-          "max_ns": 1643520,
-          "worst_at_ms": 70.568128
-        },
-        {
-          "g": 1068213,
-          "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
-          "assists": 6,
-          "total_ns": 3499329,
-          "max_ns": 1678912,
-          "worst_at_ms": 75.028032
-        }
-      ]
-    },
     "latency_comparison": {
       "during_gc": {
         "count": 869,
@@ -111,6 +63,110 @@
     "sweep": {
       "count": 333,
       "total_ns": 359226
+    },
+    "per_cycle": {
+      "cycles": [
+        {
+          "cycle": 1,
+          "start_ms": 69.299264,
+          "duration_ns": 14160768,
+          "assist_events": 61,
+          "assist_goroutines": 29,
+          "assist_total_ns": 28239999,
+          "top_goroutines": [
+            {
+              "g": 1068065,
+              "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
+              "assists": 4,
+              "total_ns": 4716160,
+              "max_ns": 3251776,
+              "worst_at_ms": 73.187904
+            },
+            {
+              "g": 1067930,
+              "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
+              "assists": 2,
+              "total_ns": 4332032,
+              "max_ns": 3481024,
+              "worst_at_ms": 71.874944
+            },
+            {
+              "g": 1068084,
+              "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
+              "assists": 5,
+              "total_ns": 3777216,
+              "max_ns": 3243776,
+              "worst_at_ms": 72.88928
+            },
+            {
+              "g": 1068213,
+              "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
+              "assists": 5,
+              "total_ns": 3405760,
+              "max_ns": 1678912,
+              "worst_at_ms": 75.028032
+            },
+            {
+              "g": 1065731,
+              "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
+              "assists": 4,
+              "total_ns": 3119040,
+              "max_ns": 2371648,
+              "worst_at_ms": 75.974848
+            }
+          ]
+        },
+        {
+          "cycle": 2,
+          "start_ms": 687.8688,
+          "duration_ns": 11623296,
+          "assist_events": 11,
+          "assist_goroutines": 10,
+          "assist_total_ns": 5191233,
+          "top_goroutines": [
+            {
+              "g": 1068180,
+              "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
+              "assists": 1,
+              "total_ns": 1966720,
+              "max_ns": 1966720,
+              "worst_at_ms": 689.48864
+            },
+            {
+              "g": 1058917,
+              "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
+              "assists": 2,
+              "total_ns": 1474624,
+              "max_ns": 1222272,
+              "worst_at_ms": 689.857472
+            },
+            {
+              "g": 1068032,
+              "name": "github.com/cockroachdb/cockroach/pkg/sql/pgwire.(*Server).serveImpl.func4",
+              "assists": 1,
+              "total_ns": 966336,
+              "max_ns": 966336,
+              "worst_at_ms": 688.759424
+            },
+            {
+              "g": 1058474,
+              "name": "github.com/cockroachdb/cockroach/pkg/util/netutil.(*TCPServer).ServeWith.func1",
+              "assists": 1,
+              "total_ns": 181376,
+              "max_ns": 181376,
+              "worst_at_ms": 688.751744
+            },
+            {
+              "g": 1068107,
+              "name": "github.com/cockroachdb/cockroach/pkg/util/netutil.(*TCPServer).ServeWith.func1",
+              "assists": 1,
+              "total_ns": 162368,
+              "max_ns": 162368,
+              "worst_at_ms": 688.766656
+            }
+          ]
+        }
+      ]
     }
   }
 }

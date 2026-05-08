@@ -417,10 +417,9 @@ func (r *ByCreatorReport) String() string {
 type GCReport struct {
 	CycleSummary      *GCCycleSummary      `json:"cycle_summary,omitempty"`
 	STW               *GCSTWSummary        `json:"stw,omitempty"`
-	MarkAssist        *GCMarkAssist        `json:"mark_assist,omitempty"`
 	LatencyComparison *GCLatencyComparison `json:"latency_comparison,omitempty"`
-	PerCycle          *GCPerCycleBreakdown `json:"per_cycle,omitempty"`
 	Sweep             *GCSweepSummary      `json:"sweep,omitempty"`
+	PerCycle          *GCPerCycleDetail    `json:"per_cycle,omitempty"`
 }
 
 func (g *GCReport) String() string {
@@ -432,17 +431,14 @@ func (g *GCReport) String() string {
 	if g.STW != nil {
 		b.WriteString(g.STW.String())
 	}
-	if g.MarkAssist != nil {
-		b.WriteString(g.MarkAssist.String())
-	}
 	if g.LatencyComparison != nil {
 		b.WriteString(g.LatencyComparison.String())
 	}
-	if g.PerCycle != nil {
-		b.WriteString(g.PerCycle.String())
-	}
 	if g.Sweep != nil {
 		b.WriteString(g.Sweep.String())
+	}
+	if g.PerCycle != nil {
+		b.WriteString(g.PerCycle.String())
 	}
 	return b.String()
 }
@@ -491,39 +487,6 @@ func (g *GCSTWSummary) String() string {
 	return b.String()
 }
 
-type GCMarkAssist struct {
-	TotalEvents     int                `json:"total_events"`
-	TotalGoroutines int                `json:"total_goroutines"`
-	TotalNs         *int64             `json:"total_ns,omitempty"`
-	MaxSingleNs     *int64             `json:"max_single_ns,omitempty"`
-	TopGoroutines   []MarkAssistGEntry `json:"top_goroutines,omitempty"`
-}
-
-type MarkAssistGEntry struct {
-	G         int64   `json:"g"`
-	Name      string  `json:"name"`
-	Assists   int     `json:"assists"`
-	TotalNs   int64   `json:"total_ns"`
-	MaxNs     int64   `json:"max_ns"`
-	WorstAtMs float64 `json:"worst_at_ms"`
-}
-
-func (g *GCMarkAssist) String() string {
-	if g.TotalEvents == 0 {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "  Mark assist: %d events across %d goroutines, total: %s, max single: %s\n",
-		g.TotalEvents, g.TotalGoroutines, fmtNsPtr(g.TotalNs), fmtNsPtr(g.MaxSingleNs))
-	b.WriteString("    Top affected goroutines:\n")
-	for _, e := range g.TopGoroutines {
-		fmt.Fprintf(&b, "      g%-8d %-40s %d assists, total %s, max %s @ t=%.0fms\n",
-			e.G, shortenFunc(e.Name), e.Assists,
-			fmtDuration(float64(e.TotalNs)), fmtDuration(float64(e.MaxNs)), e.WorstAtMs)
-	}
-	return b.String()
-}
-
 type GCLatencyComparison struct {
 	DuringGC LatencyBucket `json:"during_gc"`
 	NonGC    LatencyBucket `json:"non_gc"`
@@ -559,25 +522,49 @@ func (g *GCLatencyComparison) String() string {
 	return b.String()
 }
 
-type GCPerCycleBreakdown struct {
-	Cycles []GCCycleEntry `json:"cycles"`
+// GCPerCycleDetail is the per-cycle GC mark-assist breakdown. For each GC
+// cycle we show its start time, duration, mark-assist totals, and the top
+// affected goroutines (by total assist time within the cycle).
+type GCPerCycleDetail struct {
+	Cycles []GCCycleDetail `json:"cycles"`
 }
 
-type GCCycleEntry struct {
-	Cycle        int   `json:"cycle"`
-	DurationNs   int64 `json:"duration_ns"`
-	Assists      int   `json:"assists"`
-	Goroutines   int   `json:"goroutines"`
-	AssistTimeNs int64 `json:"assist_time_ns"`
+type GCCycleDetail struct {
+	Cycle            int            `json:"cycle"`
+	StartMs          float64        `json:"start_ms"`
+	DurationNs       int64          `json:"duration_ns"`
+	AssistEvents     int            `json:"assist_events"`
+	AssistGoroutines int            `json:"assist_goroutines"`
+	AssistTotalNs    int64          `json:"assist_total_ns"`
+	TopGoroutines    []CycleAssistG `json:"top_goroutines,omitempty"`
 }
 
-func (g *GCPerCycleBreakdown) String() string {
+type CycleAssistG struct {
+	G         int64   `json:"g"`
+	Name      string  `json:"name"`
+	Assists   int     `json:"assists"`
+	TotalNs   int64   `json:"total_ns"`
+	MaxNs     int64   `json:"max_ns"`
+	WorstAtMs float64 `json:"worst_at_ms"`
+}
+
+func (g *GCPerCycleDetail) String() string {
 	var b strings.Builder
-	b.WriteString("  Per-cycle breakdown:\n")
-	fmt.Fprintf(&b, "    %-6s %-12s %-8s %-12s %-12s\n", "Cycle", "Duration", "Assists", "Goroutines", "Assist Time")
 	for _, c := range g.Cycles {
-		fmt.Fprintf(&b, "    %-6d %-12s %-8d %-12d %-12s\n",
-			c.Cycle, fmtDuration(float64(c.DurationNs)), c.Assists, c.Goroutines, fmtDuration(float64(c.AssistTimeNs)))
+		if c.AssistEvents == 0 {
+			fmt.Fprintf(&b, "\n  Cycle %d @ t=%.0fms, duration: %s (no mark assists)\n",
+				c.Cycle, c.StartMs, fmtDuration(float64(c.DurationNs)))
+			continue
+		}
+		fmt.Fprintf(&b, "\n  Cycle %d @ t=%.0fms, duration: %s\n",
+			c.Cycle, c.StartMs, fmtDuration(float64(c.DurationNs)))
+		fmt.Fprintf(&b, "    Mark assist: %d events, %d goroutines, total: %s\n",
+			c.AssistEvents, c.AssistGoroutines, fmtDuration(float64(c.AssistTotalNs)))
+		for _, r := range c.TopGoroutines {
+			fmt.Fprintf(&b, "      g%-8d %-40s %d assists, total %s, max %s @ t=%.0fms\n",
+				r.G, shortenFunc(r.Name), r.Assists,
+				fmtDuration(float64(r.TotalNs)), fmtDuration(float64(r.MaxNs)), r.WorstAtMs)
+		}
 	}
 	return b.String()
 }
